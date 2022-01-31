@@ -5,18 +5,110 @@
     Version: 1.0
     THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.'''
 
+# 1/20: Created from extract_filter_atl08.py and edited to work with v005 data
+# CHANGES from above script:
+# - Changed default min/max month from 6-9 to 1-12
+# - Changed default min/max latitude from 45-75 to 30-90
+
+# - Commented/removed references to tcc_flg everywhere
+# - Updated flag to get tcc_prc (and removed references to tcc_prc under if do_30)
+    
+# - Set SUBSET_COLS = False in call to filter
+    
+# - Changing if do_30 to do_20 and making several other changes:
+    # See 1/21/22 for areas that were changed
+    
+# 1/24/22
+# - Changed the way if do_20m works with code. Instead of replacing 100m stuff,
+    # it just gets added to the 100m stuff. This will multiply the number of
+    # output rows by 5, but is the best solution since not much info for 20m
+    # segments is provided. Unnecessary info can be pared down later
+    
+# 1/25/22
+# - Adding code to get uniqueIDs (for 100m and 20m)
+# - Adding code to get min/max of unfiltered data and return (outCSV, extent)
+    # so it can be written to .csv in wrapper code
+# - Adding logging option for runs
+
 import h5py
-from osgeo import gdal
+#from osgeo import gdal
 import numpy as np
 import pandas as pd
-import subprocess
+#import subprocess
 import os
 import math
 
 import argparse
 
-import datetime, time
+import time
 from datetime import datetime
+
+# Added 1/25/22
+def getUniqueId(lon, lat, date, segment):
+    
+    import math
+
+    # Get yyyymmdd:
+    date = time.strptime(date.decode("utf-8").split('T')[0], '%Y-%m-%d')
+    idDate = '{}{}{}'.format(date.tm_year, date.tm_mon, date.tm_mday)
+    
+    # Configure lat/lon portion of ID:
+    # We want to always get 6 digits after decimal point to be safe (prob not necessary)
+    # Depending on number of digits in whole part, decimal part may be padded with 0s
+    lonSplit = math.modf(lon) # split into whole and decimal parts
+    lonWhole = str(lonSplit[1]).strip('-').split('.')[0] # probably a better way to do this but oh well
+    lonDec = str(lonSplit[0]).split('.')[1][0:6]
+    
+    latSplit = math.modf(lat)
+    latWhole = str(latSplit[1]).strip('-').split('.')[0]
+    latDec = str(latSplit[0]).split('.')[1][0:6]
+    
+    if lon < 0: lonDir = 'W'
+    elif lon > 0: lonDir = 'E'
+    else: lonDir = '0' # if (should never happen) lon = 0, 0.0000000 -> 00000000
+        
+    if lat < 0: latDir = 'S'
+    elif lat > 0: latDir = 'N'
+    else: latDir = '0' # if (should never happen) lon = 0, 0.0000000 -> 00000000
+    
+    idLon = '{}{}{}'.format(lonWhole, lonDir, lonDec)   
+    idLat = '{}{}{}'.format(latWhole, latDir, latDec)
+
+    # To ensure all uniqueIDs are the same length, pad end with 0s
+    while len(idLon) < 10: idLon = '{}0'.format(idLon)
+    while len(idLat) < 10: idLat = '{}0'.format(idLat)
+    
+    # And pad 20m segment with 0 to left
+    while len(str(segment)) < 3: segment = '0{}'.format(segment)
+        
+    # Put them together
+    #108W324536-76N2836387-20190828-20 --> center lon is -108.324536; center lat is 76.2836387; date is 2019-08-28; 20m segment
+    uID = '{}-{}-{}-{}'.format(idLon, idLat, idDate, segment)
+    
+    return uID
+
+def reconfigureArrays(inDict):
+    
+    outDict = {}
+    repeat = 5 # 5 20m segments in 100m segment
+    
+    for key, inArr in inDict.items():
+        outArr = np.array([])
+        
+        # 100m segment arrays need to have values multiplied
+        if inArr.ndim == 1: 
+            for i in inArr:
+                for r in range(repeat):
+                    outArr = np.append(outArr, i)
+        
+        # 20m segment arrays need to have their 2nd dimension flattened
+        elif inArr.ndim == 2: 
+            outArr = inArr.flatten()
+            
+        # Build up the new dict
+        outDict[key] = outArr
+        
+    return outDict
 
 def rec_merge1(d1, d2):
     '''return new merged dict of dicts'''
@@ -27,9 +119,53 @@ def rec_merge1(d1, d2):
     d3.update(d2)
     return d3
 
+def calculateElapsedTime(start, end, unit = 'minutes'):
+    
+    # start and end = time.time()
+    
+    if unit == 'minutes':
+        elapsedTime = round((time.time()-start)/60, 4)
+    elif unit == 'hours':
+        elapsedTime = round((time.time()-start)/60/60, 4)
+    else:
+        elapsedTime = round((time.time()-start), 4)  
+        unit = 'seconds'
+        
+    #print("\nEnd: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
+    print("Elapsed time: {} {}".format(elapsedTime, unit))
+    
+    return None
+
 def extract_atl08(args):
+    
+      # Start clock
+    start = time.time()
+    print("\nBegin: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
+    
+    # Input sanitization
+    if str(args.input).endswith('.h5'):
+        pass
+    else:
+        print("INPUT ICESAT2 FILE MUST END '.H5'")
+        os._exit(1)
+    if args.output == None:
+        print("\n OUTPUT DIR IS NOT SPECIFIED (OPTIONAL). OUTPUT WILL BE PLACED IN THE SAME LOCATION AS INPUT H5 \n\n")
+    else:
+        pass
+    if args.resolution == None:
+        print("SPECIFY OUTPUT RASTER RESOLUTION IN METERS'")
+        os._exit(1)
+    else:
+        pass
+
+    if args.filter_geo:
+        print("Min lat: {}".format(args.minlat))
+        print("Max lat: {}".format(args.maxlat))
+        print("Min lon: {}".format(args.minlon))
+        print("Max lon: {}".format(args.maxlon))  
+
     TEST = args.TEST
-    do_30m = args.do_30m
+    do_20m = args.do_20m
     
     # File path to ICESat-2h5 file
     H5 = args.input
@@ -58,6 +194,8 @@ def extract_atl08(args):
             # Overwite is False (off) but file DOES NOT exist
             pass
 
+    # 1/21/22: Most of this is not needed as 20m segments are stored totally different
+    """
     land_seg_path = '/land_segments/'
     if do_30m:
         segment_length = 30
@@ -66,7 +204,14 @@ def extract_atl08(args):
         segment_length = 100
         
     fn_tail = '_' + str(segment_length) + 'm.csv'
-    
+    """
+    land_seg_path = '/land_segments/' # Now, everything point-specific (for 100m or 20m segments) is within this tag
+    if do_20m:
+        segment_length = 20
+    else:
+        segment_length = 100
+    fn_tail = '_' + str(segment_length) + 'm.csv'
+        
     print("\nSegment length: {}m".format(segment_length)) 
     
     # open file
@@ -84,17 +229,25 @@ def extract_atl08(args):
     # set up blank lists
     latitude, longitude, segid_beg, segid_end = ([] for i in range(4))
 
-    # Canopy fields
-    can_h_met_0, can_h_met_1, can_h_met_2, can_h_met_3, can_h_met_4, can_h_met_5, can_h_met_6, can_h_met_7, can_h_met_8 = ([] for i in range(9))
+    # Canopy fields - 100m
+    # no RH % specific fields, for 100m or otherwise
+    #can_h_met_0, can_h_met_1, can_h_met_2, can_h_met_3, can_h_met_4, can_h_met_5, can_h_met_6, can_h_met_7, can_h_met_8 = ([] for i in range(9))
     can_h_met = []   # Relative	(RH--)	canopy height	metrics calculated	at	the	following	percentiles: 25,50,	60,	70,	75,	80,	85,	90,	95
     h_max_can = []
     h_can = []      # 98% height of all the individual canopy relative heights for the segment above the estimated terrain surface. Relative canopy heights have been computed by differencing the canopy photon height from the estimated terrain surface.
-
     n_ca_ph = []
     n_toc_ph = []
     can_open = []    # stdv of all photons classified as canopy within segment
-    tcc_flg = [] # Flag indicating that more than 50% of the Landsat Continuous Cover product have values > 100 for the L-Km segment.  Canopy is assumed present along the L-km segment if landsat_flag is 1.
-    tcc_prc = [] # Average percentage value of the valid (value <= 100) Landsat Tree Cover Continuous Fields product for each 100 m segment
+    # 1/21/22 Changes - remove tcc_flg ref; change tcc_prc comment
+    #tcc_flg = [] # Flag indicating that more than 50% of the Landsat Continuous Cover product have values > 100 for the L-Km segment.  Canopy is assumed present along the L-km segment if landsat_flag is 1.
+    tcc_prc = [] # Average percentage value of the valid (value <= 100) Copernicus fractional cover product for each 100 m segment
+
+    # 1/21/22: additional fields for 20m segments:
+    if do_20m:
+        latitude_20m  = []
+        longitude_20m = []
+        h_can_20m = []
+        h_te_best_20m = []
 
     # Uncertainty fields
     n_seg_ph = []   # Number of photons within each land segment.
@@ -129,8 +282,8 @@ def extract_atl08(args):
     lyr_flg = []
 
     # NEED TO ADD THESE
-    h_canopy_uncertainty = []
-    h_canopy_quad = []
+    #h_canopy_uncertainty = []
+    #h_canopy_quad = []
 
     if False:
         # Granule level info
@@ -194,8 +347,15 @@ def extract_atl08(args):
         segid_end.append(f['/' + line   + land_seg_path + 'segment_id_end/'][...,].tolist())
         
         # Canopy fields
-        if do_30m:
+        # 1/21/22: None of these fields exist for 20m segments apparently (as of now)
+        # Except RH98 (h_canopy_20m), lat/lon (_20m), h_te_best_fit_20m
 
+        if do_20m:
+            latitude_20m.append(f['/' + line    + land_seg_path + 'latitude_20m/'][...,].tolist())
+            longitude_20m.append(f['/' + line   + land_seg_path + 'longitude_20m/'][...,].tolist())
+            h_can_20m.append(f['/' + line       + '/land_segments/canopy/h_canopy_20m'][...,].tolist())
+            
+            """
             can_h_met_0.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_25/'][...,].tolist() )
             can_h_met_1.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_30/'][...,].tolist() )
             can_h_met_2.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_40/'][...,].tolist() )
@@ -205,30 +365,36 @@ def extract_atl08(args):
             can_h_met_6.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_75/'][...,].tolist() )
             can_h_met_7.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_80/'][...,].tolist() )
             can_h_met_8.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_90/'][...,].tolist() )
-            
+                        
             if TEST:
                 pass
                 #print(len(can_h_met_0), len(can_h_met_1), len(can_h_met_2))
-                
+            
+            # The following is not 20m specific and as such should be done regardless of if do_20m 
             h_max_can.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_100/'][...,].tolist())
             h_can.append(f['/' + line       + '/land_segments/30m_segment/atl03_rh_98/'][...,].tolist())
             
             n_ca_ph.append(f['/' + line     + '/land_segments/30m_segment/n_ca_photons/'][...,].tolist())
             n_toc_ph.append(f['/' + line    + '/land_segments/30m_segment/n_toc_photons/'][...,].tolist())
             can_open.append(f['/' + line    + '/land_segments/30m_segment/canopy_openness/'][...,].tolist())
-            tcc_flg.append(f['/' + line     + '/land_segments/30m_segment/landsat_flag/'][...,].tolist())
-            tcc_prc.append(f['/' + line     + '/land_segments/30m_segment/landsat_perc/'][...,].tolist())            
-        else:
-            can_h_met.append(f['/' + line   + '/land_segments/canopy/canopy_h_metrics/'][...,].tolist())
-            
-            h_max_can.append(f['/' + line   + '/land_segments/canopy/h_max_canopy/'][...,].tolist())
-            h_can.append(f['/' + line       + '/land_segments/canopy/h_canopy/'][...,].tolist())
-            
-            n_ca_ph.append(f['/' + line     + '/land_segments/canopy/n_ca_photons/'][...,].tolist())
-            n_toc_ph.append(f['/' + line    + '/land_segments/canopy/n_toc_photons/'][...,].tolist())
-            can_open.append(f['/' + line    + '/land_segments/canopy/canopy_openness/'][...,].tolist())
-            tcc_flg.append(f['/' + line     + '/land_segments/canopy/landsat_flag/'][...,].tolist())
-            tcc_prc.append(f['/' + line     + '/land_segments/canopy/landsat_perc/'][...,].tolist())
+            # 1/21/22 Changes - no tcc for do_20m
+            #tcc_flg.append(f['/' + line     + '/land_segments/30m_segment/landsat_flag/'][...,].tolist())
+            #tcc_prc.append(f['/' + line     + '/land_segments/30m_segment/landsat_perc/'][...,].tolist())
+            """ 
+        # 1/21/22 *Instead of if/else, we want 20m-specific info to be done in *addition* to 100m, not instead of
+        
+        can_h_met.append(f['/' + line   + '/land_segments/canopy/canopy_h_metrics/'][...,].tolist())
+        
+        h_max_can.append(f['/' + line   + '/land_segments/canopy/h_max_canopy/'][...,].tolist())
+        h_can.append(f['/' + line       + '/land_segments/canopy/h_canopy/'][...,].tolist())
+        
+        n_ca_ph.append(f['/' + line     + '/land_segments/canopy/n_ca_photons/'][...,].tolist())
+        n_toc_ph.append(f['/' + line    + '/land_segments/canopy/n_toc_photons/'][...,].tolist())
+        can_open.append(f['/' + line    + '/land_segments/canopy/canopy_openness/'][...,].tolist())
+        # 1/21/22 Changes - new flag to tcc_prc
+        #tcc_flg.append(f['/' + line     + '/land_segments/canopy/landsat_flag/'][...,].tolist())
+        #tcc_prc.append(f['/' + line     + '/land_segments/canopy/landsat_perc/'][...,].tolist())
+        tcc_prc.append(f['/' + line     + '/land_segments/canopy/segment_cover/'][...,].tolist())
       
     
         # Uncertinaty fields
@@ -246,16 +412,17 @@ def extract_atl08(args):
         sig_topo.append(f['/' + line    + land_seg_path + 'sigma_topo/'][...,].tolist())
 
         # Terrain fields
-        if do_30m:
-            n_te_ph.append(f['/' + line     + '/land_segments/30m_segment/n_te_photons/'][...,].tolist())
-            h_te_best.append(f['/' + line   + '/land_segments/30m_segment/h_te_best_fit/'][...,].tolist())
-            h_te_unc.append(f['/' + line    + '/land_segments/30m_segment/h_te_uncertainty/'][...,].tolist())
-            ter_slp.append(f['/' + line     + '/land_segments/30m_segment/terrain_slope/'][...,].tolist())
-        else:
-            n_te_ph.append(f['/' + line     + '/land_segments/terrain/n_te_photons/'][...,].tolist())
-            h_te_best.append(f['/' + line   + '/land_segments/terrain/h_te_best_fit/'][...,].tolist())
-            h_te_unc.append(f['/' + line    + '/land_segments/terrain/h_te_uncertainty/'][...,].tolist())
-            ter_slp.append(f['/' + line     + '/land_segments/terrain/terrain_slope/'][...,].tolist())
+        # 1/21/22: Same thing as above. Only one terrain field is 20m specific, so do it in addition to, not instead of
+        if do_20m:
+            #n_te_ph.append(f['/' + line     + '/land_segments/30m_segment/n_te_photons/'][...,].tolist())
+            h_te_best_20m.append(f['/' + line   + '/land_segments/terrain/h_te_best_fit_20m'][...,].tolist())
+            #h_te_unc.append(f['/' + line    + '/land_segments/30m_segment/h_te_uncertainty/'][...,].tolist())
+            #ter_slp.append(f['/' + line     + '/land_segments/30m_segment/terrain_slope/'][...,].tolist())
+        #else:
+        n_te_ph.append(f['/' + line     + '/land_segments/terrain/n_te_photons/'][...,].tolist())
+        h_te_best.append(f['/' + line   + '/land_segments/terrain/h_te_best_fit/'][...,].tolist())
+        h_te_unc.append(f['/' + line    + '/land_segments/terrain/h_te_uncertainty/'][...,].tolist())
+        ter_slp.append(f['/' + line     + '/land_segments/terrain/terrain_slope/'][...,].tolist())
             
         snr.append(f['/' + line         + land_seg_path + 'snr/'][...,].tolist())
         sol_az.append(f['/' + line      + land_seg_path + 'solar_azimuth/'][...,].tolist())
@@ -294,7 +461,14 @@ def extract_atl08(args):
     h_max_can   =np.array([h_max_can[l][k] for l in range(nLines) for k in range(len(h_max_can[l]))] )
     h_can       =np.array([h_can[l][k] for l in range(nLines) for k in range(len(h_can[l]))] )
     
-    if do_30m:
+    # 1/21/22: No more can_h_met_0 etc for 20m segments - will make separate RH % arrays later on
+    if do_20m:
+        latitude_20m  = np.array([latitude_20m[l][k] for l in range(nLines) for k in range(len(latitude_20m[l]))])
+        longitude_20m = np.array([longitude_20m[l][k] for l in range(nLines) for k in range(len(longitude_20m[l]))])
+        h_can_20m     = np.array([h_can_20m[l][k] for l in range(nLines) for k in range(len(h_can_20m[l]))])
+        h_te_best_20m = np.array([h_te_best_20m[l][k] for l in range(nLines) for k in range(len(h_te_best_20m[l]))])
+        
+        """
         can_h_met_0 = np.array([can_h_met_0[l][k] for l in range(nLines) for k in range(len(can_h_met_0[l]))])
         can_h_met_1 = np.array([can_h_met_1[l][k] for l in range(nLines) for k in range(len(can_h_met_1[l]))])
         can_h_met_2 = np.array([can_h_met_2[l][k] for l in range(nLines) for k in range(len(can_h_met_2[l]))])
@@ -304,13 +478,14 @@ def extract_atl08(args):
         can_h_met_6 = np.array([can_h_met_6[l][k] for l in range(nLines) for k in range(len(can_h_met_6[l]))])
         can_h_met_7 = np.array([can_h_met_7[l][k] for l in range(nLines) for k in range(len(can_h_met_7[l]))])
         can_h_met_8 = np.array([can_h_met_8[l][k] for l in range(nLines) for k in range(len(can_h_met_8[l]))])
-    else:
-        can_h_met = np.array([can_h_met[l][k] for l in range(nLines) for k in range(len(can_h_met[l]))])
+        """
+    #else: # not instead of 20m, but in addition to
+    can_h_met = np.array([can_h_met[l][k] for l in range(nLines) for k in range(len(can_h_met[l]))])
         
     n_ca_ph     =np.array([n_ca_ph[l][k] for l in range(nLines) for k in range(len(n_ca_ph[l]))] )
     n_toc_ph    =np.array([n_toc_ph[l][k] for l in range(nLines) for k in range(len(n_toc_ph[l]))] )
     can_open    =np.array([can_open[l][k] for l in range(nLines) for k in range(len(can_open[l]))] )
-    tcc_flg     =np.array([tcc_flg[l][k] for l in range(nLines) for k in range(len(tcc_flg[l]))] )
+    #tcc_flg     =np.array([tcc_flg[l][k] for l in range(nLines) for k in range(len(tcc_flg[l]))] )
     tcc_prc     =np.array([tcc_prc[l][k] for l in range(nLines) for k in range(len(tcc_prc[l]))] )
 
     cloud_flg   =np.array([cloud_flg[l][k] for l in range(nLines) for k in range(len(cloud_flg[l]))] )
@@ -357,8 +532,6 @@ def extract_atl08(args):
         print("\t\tnp.nanmax: \t{}".format(np.nanmax(h_can)) )
         print("\t\tnp.max: \t{}".format(np.max(h_can)) )
         
-           
-        
         print('[BEFORE] # of nan ATL08 obs of h_can: \t{}'.format(len( h_can[np.isnan(h_can) ] )))
         h_can = np.array([val_invalid if math.isnan(x) else x for x in h_can])
         print("Set h_can max to float32 max; np.max: \t {}".format(np.max(h_can)))
@@ -389,19 +562,19 @@ def extract_atl08(args):
         print('Raster X (' + str(args.resolution) + ' m) Resolution at ' + str(CenterLat) + ' degrees N = ' + str(pixelSpacingInDegreeX))
         print('Raster Y (' + str(args.resolution) + ' m) Resolution at ' + str(CenterLat) + ' degrees N = ' + str(pixelSpacingInDegreeY))
 
-    # Create a handy ID label for each point
+    # Create a handy ID label for each point - this will be repeated if do_20m is True
     fid = np.arange(1, len(h_max_can)+1, 1)
 
     if TEST:
         print("\nSet up a dataframe dictionary...")
 
-    dict_pandas_df = {}
+    #dict_pandas_df = {}
     
+    # 1/21/22: Instead of having separate 100m/20m dicts, add to dictionaries if do_20m is True    
     dict_orb_gt_seg = {
-                    'fid'       :fid,
+                    'fid_100m'  :fid,
                     'lon'       :longitude,
                     'lat'       :latitude,
-
                     #'yr'        :np.full(longitude.shape, yr[0]),
                     #'m'         :np.full(longitude.shape, m[0]),
                     #'d'         :np.full(longitude.shape, d[0]),
@@ -414,41 +587,36 @@ def extract_atl08(args):
                     'segid_beg' :segid_beg,
                     'segid_end' :segid_end
     }
-    if do_30m:
-        dict_rh_metrics_30m = {
-                        'h_max_can' :h_max_can,
-                        'h_can'     :h_can,
-
-                        'rh25'      :can_h_met_0,
-                        'rh30'      :can_h_met_1,
-                        'rh40'      :can_h_met_2,
-                        'rh50'      :can_h_met_3,
-                        'rh60'      :can_h_met_4,
-                        'rh70'      :can_h_met_5,
-                        'rh75'      :can_h_met_6,
-                        'rh80'      :can_h_met_7,
-                        'rh90'      :can_h_met_8     
-        }
-    else:
-        dict_rh_metrics_100m = {
-                        'h_max_can' :h_max_can,
-                        'h_can'     :h_can,
-
-                        'rh25'      :can_h_met[:,0],
-                        'rh50'      :can_h_met[:,1],
-                        'rh60'      :can_h_met[:,2],
-                        'rh70'      :can_h_met[:,3],
-                        'rh75'      :can_h_met[:,4],
-                        'rh80'      :can_h_met[:,5],
-                        'rh85'      :can_h_met[:,6],
-                        'rh90'      :can_h_met[:,7],
-                        'rh95'      :can_h_met[:,8]
-        }
+    
+    dict_rh_metrics = {
+                    'h_max_can' :h_max_can,
+                    'h_can'     :h_can,
+                    # RHs: 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95%
+                    'rh10'      :can_h_met[:,0],
+                    'rh15'      :can_h_met[:,1],
+                    'rh20'      :can_h_met[:,2],
+                    'rh25'      :can_h_met[:,3],
+                    'rh30'      :can_h_met[:,4],
+                    'rh35'      :can_h_met[:,5],
+                    'rh40'      :can_h_met[:,6],
+                    'rh45'      :can_h_met[:,7],
+                    'rh50'      :can_h_met[:,8],
+                    'rh55'      :can_h_met[:,9],
+                    'rh60'      :can_h_met[:,10],
+                    'rh65'      :can_h_met[:,11],
+                    'rh70'      :can_h_met[:,12],
+                    'rh75'      :can_h_met[:,13],
+                    'rh80'      :can_h_met[:,14],
+                    'rh85'      :can_h_met[:,15],
+                    'rh90'      :can_h_met[:,16],
+                    'rh95'      :can_h_met[:,17]
+    }
+    
     dict_other_fields = {
                     'n_ca_ph'   :n_ca_ph,
                     'n_toc_ph'  :n_toc_ph,
                     'can_open'  :can_open,
-                    'tcc_flg'   :tcc_flg,
+                    #'tcc_flg'   :tcc_flg,
                     'tcc_prc'   :tcc_prc,
 
                     'cloud_flg' :cloud_flg,
@@ -480,11 +648,115 @@ def extract_atl08(args):
                     'seg_wmask' :seg_wmask,
                     'lyr_flg'   :lyr_flg
     }
+    
+    # 1/21/22: Add 20m segment arrays to dict now
+    if do_20m:
+        dict_orb_gt_seg['lon_20m'] = longitude_20m
+        dict_orb_gt_seg['lat_20m'] = latitude_20m
+        
+        dict_rh_metrics['h_can_20m'] = h_can_20m
+        
+        dict_other_fields['h_te_best_20m'] = h_te_best_20m            
+    
+    # OLD CODE
+    """
+    if do_20m:
+        dict_rh_metrics_30m = {
+                        'h_max_can' :h_max_can,
+                        'h_can'     :h_can,
+                        
+                        'rh25'      :can_h_met_0,
+                        'rh30'      :can_h_met_1,
+                        'rh40'      :can_h_met_2,
+                        'rh50'      :can_h_met_3,
+                        'rh60'      :can_h_met_4,
+                        'rh70'      :can_h_met_5,
+                        'rh75'      :can_h_met_6,
+                        'rh80'      :can_h_met_7,
+                        'rh90'      :can_h_met_8     
+        }
+    else:
+        dict_rh_metrics_100m = {
+                        'h_max_can' :h_max_can,
+                        'h_can'     :h_can,
+
+                        'rh25'      :can_h_met[:,0],
+                        'rh50'      :can_h_met[:,1],
+                        'rh60'      :can_h_met[:,2],
+                        'rh70'      :can_h_met[:,3],
+                        'rh75'      :can_h_met[:,4],
+                        'rh80'      :can_h_met[:,5],
+                        'rh85'      :can_h_met[:,6],
+                        'rh90'      :can_h_met[:,7],
+                        'rh95'      :can_h_met[:,8]
+        }
+    dict_other_fields = {
+                    'n_ca_ph'   :n_ca_ph,
+                    'n_toc_ph'  :n_toc_ph,
+                    'can_open'  :can_open,
+                    #'tcc_flg'   :tcc_flg,
+                    'tcc_prc'   :tcc_prc,
+
+                    'cloud_flg' :cloud_flg,
+                    'msw_flg'   :msw_flg,
+                    'n_seg_ph'  :n_seg_ph,
+                    'night_flg' :night_flg,
+                    'seg_landcov':seg_landcov,
+                    'seg_snow'  :seg_snow,
+                    'seg_water' :seg_water,
+                    'sig_vert'  :sig_vert,
+                    'sig_acr'   :sig_acr,
+                    'sig_along' :sig_along,
+                    'sig_h'     :sig_h,
+                    'sig_topo'  :sig_topo,
+
+                    'n_te_ph'   :n_te_ph,
+                    'h_te_best' :h_te_best,
+                    'h_te_unc'  :h_te_unc,
+                    'ter_slp'   :ter_slp,
+                    'snr'       :snr,
+                    'sol_az'    :sol_az,
+                    'sol_el'    :sol_el,
+
+                    'asr'       :asr,
+                    'h_dif_ref' :h_dif_ref,
+                    'ter_flg'   :ter_flg,
+                    'ph_rem_flg':ph_rem_flg,
+                    'dem_rem_flg':dem_rem_flg,
+                    'seg_wmask' :seg_wmask,
+                    'lyr_flg'   :lyr_flg
+    }
+    """
+    
+
     print("\nBuilding pandas dataframe...")
-    if do_30m:
+
+    # 1/21/22: Already added any 20m entries to dataframes so no need for if/else   
+    """
+    if do_20m:
         out=pd.DataFrame(rec_merge1(dict_orb_gt_seg, rec_merge1(dict_rh_metrics_30m,dict_other_fields)) )
     else:
         out=pd.DataFrame(rec_merge1(dict_orb_gt_seg, rec_merge1(dict_rh_metrics_100m,dict_other_fields)) )
+    """
+    # First, get one big dictionary for all value types
+    outDict = rec_merge1(dict_orb_gt_seg, rec_merge1(dict_rh_metrics, dict_other_fields))
+    
+    # 1/24/22 - Added portion here to configure arrays if 20_20m is True
+    # If we are not adding 20m segments, all arrays in outDict will be of shape
+    # (X,) [aka ndims = 1], so no edits need to be made before DF creation
+    
+    # But if we are doing 20m segments, we need to reconfigure the 1D arrays to
+    # repeat the 100m info for each 20m segment. This will multiply the size of 
+    # all 1D (aka 100m segment) arrays by 5 and therefore the output .csv, but 
+    # this way we can still use exisiting filters and avoid losing the 100m 
+    # info associated with each 20m segment
+    # The redundant info can be cleaned up in zonal stats outputs and/or can
+    # be taken care of if using an actual database
+    if do_20m:
+        outDict = reconfigureArrays(outDict)
+    
+    # Create DF from dictionary
+    out = pd.DataFrame(outDict)
     
     print("Setting pandas df nodata values to np.nan for some basic eval.")
     out = out.replace(val_nodata_src, np.nan)
@@ -513,6 +785,29 @@ def extract_atl08(args):
     print("Setting out pandas df nodata values: \t{}".format(val_nodata_out))
     out = out.replace(np.nan, val_nodata_out)
     
+    # 1/22: NEW with v005 - seg_landcover changed to Copernicus
+    # set_flag_names is False but if we want it to be True, need to update
+    # seg_landcover (and others?) using the following:
+    """
+    [0, 111, 113, 112, 114, 115, 116, 121, 123, 122, 124, 125, 126,
+     20, 30, 90, 100, 60, 40, 50, 70, 80, 200] corresponds with --> 
+    ['NoData',
+    'Closed_forest_evergreen_needle_leaf',
+    'Closed_forest_deciduous_needle_leaf',
+    'Closed_forest_evergreen_broad_leaf',
+    'Closed_forest_deciduous_broad_leaf',
+    'Closed_forest_mixed', 'Closed_forest_unknown',
+    'Open_forest_evergreen_needle_leaf',
+    'Open_forest_deciduous_needle_leaf',
+    'Open_forest_evergreen_broad_leaf',
+    'Open_forest_deciduous_broad_leaf',
+    'Open_forest_mixed', 'Open_forest_unknown', 'Shrubs',
+    'Herbaceous', 'Herbaceous_wetleand',
+    'Moss_and_lichen', 'Bare_sparse_vegetation',
+    'Cultivated_and_managed_vegetation_agriculture',
+    'Urban_built_up', 'Snow_and_ice',
+    'Permanent_water_bodies', 'Open_sea']
+    """
     if args.set_flag_names:
         # Set flag names
         out['seg_landcov'] = out['seg_landcov'].map({0: "water", 1: "evergreen needleleaf forest", 2: "evergreen broadleaf forest", \
@@ -539,7 +834,7 @@ def extract_atl08(args):
 	
         # These filters are customized for boreal
         out = FilterUtils.prep_filter_atl08_qual(out)
-        out = FilterUtils.filter_atl08_qual_v2(out, SUBSET_COLS=True, DO_PREP=False,
+        out = FilterUtils.filter_atl08_qual_v2(out, SUBSET_COLS=False, DO_PREP=False,
                                                    subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh90','h_can','h_max_can','seg_landcov','night_flg','seg_water','sol_el','asr','ter_slp', 'ter_flg','y','m','d'], 
                                                    filt_cols=['h_can','h_dif_ref','m','msw_flg','beam_type','seg_snow','sig_topo'], 
                                                    thresh_h_can=100, thresh_h_dif=25, thresh_sig_topo=2.5, month_min=args.minmonth, month_max=args.maxmonth)
@@ -557,6 +852,15 @@ def extract_atl08(args):
                  ]
     else:
         print('Geographic Filtering: \t[OFF] (do downstream)')
+        
+    # 1/25/22: After filtering, get the uniqueID columns in DF
+
+    getUniqueId(out['lon'].iloc[0], out['lat'].iloc[0], out['dt'].iloc[0], 100)
+    import pdb;pdb.set_trace()
+    out['uID_100m'] = out.apply(lambda row: getUniqueId(row['lon'], row['lat'], row['dt'], 100), axis=1)
+    if do_20m:
+        out['uID_20m'] = out.apply(lambda row: getUniqueId(row['lon_20m'], row['lat_20m'], row['dt'], 20), axis=1)
+        
 
     if out.empty:
         print('File is empty.')
@@ -565,6 +869,9 @@ def extract_atl08(args):
         out_csv_fn = os.path.join(outbase + fn_tail)
         print('Creating CSV: \t\t{}'.format(out_csv_fn))
         out.to_csv(out_csv_fn,index=False, encoding="utf-8-sig")
+        
+    print("\nEnd: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))        
+    calculateElapsedTime(start, time.time())
 
 
 def main():
@@ -597,18 +904,18 @@ def main():
     parser.add_argument("--min_n_toc_ph" , type=int, default=1, help="Min number of top of canopy classified photons required for shot to be output")
     parser.add_argument("--minlon" , type=float, choices=[Range(-180.0, 180.0)], default=-180.0, help="Min longitude of ATL08 shots for output to include") 
     parser.add_argument("--maxlon" , type=float, choices=[Range(-180.0, 180.0)], default=180.0, help="Max longitude of ATL08 shots for output to include")
-    parser.add_argument("--minlat" , type=float, choices=[Range(-90.0, 90.0)], default=45.0, help="Min latitude of ATL08 shots for output to include") 
-    parser.add_argument("--maxlat" , type=float, choices=[Range(-90.0, 90.0)], default=75.0, help="Max latitude of ATL08 shots for output to include")
-    parser.add_argument("--minmonth" , type=int, choices=[Range(1, 12)], default=6, help="Min month of ATL08 shots for output to include")
-    parser.add_argument("--maxmonth" , type=int, choices=[Range(1, 12)], default=9, help="Max month of ATL08 shots for output to include")
+    parser.add_argument("--minlat" , type=float, choices=[Range(-90.0, 90.0)], default=30.0, help="Min latitude of ATL08 shots for output to include") 
+    parser.add_argument("--maxlat" , type=float, choices=[Range(-90.0, 90.0)], default=90.0, help="Max latitude of ATL08 shots for output to include")
+    parser.add_argument("--minmonth" , type=int, choices=[Range(1, 12)], default=1, help="Min month of ATL08 shots for output to include")
+    parser.add_argument("--maxmonth" , type=int, choices=[Range(1, 12)], default=12, help="Max month of ATL08 shots for output to include")
     parser.add_argument('--no-overwrite', dest='overwrite', action='store_false', help='Turn overwrite off (To help complete big runs that were interrupted)')
     parser.set_defaults(overwrite=True)
     parser.add_argument('--no-filter-qual', dest='filter_qual', action='store_false', help='Turn off quality filtering (To control filtering downstream)')
     parser.set_defaults(filter_qual=True)
     parser.add_argument('--no-filter-geo', dest='filter_geo', action='store_false', help='Turn off geographic filtering (To control filtering downstream)')
     parser.set_defaults(filter_geo=True)
-    parser.add_argument('--do_30m', dest='do_30m', action='store_true', help='Turn on 30m ATL08 extraction')
-    parser.set_defaults(do_30m=False)
+    parser.add_argument('--do_20m', dest='do_20m', action='store_true', help='Turn on 20m segment ATL08 extraction')
+    parser.set_defaults(do_20m=False)
     parser.add_argument('--set_flag_names', dest='set_flag_names', action='store_true', help='Set the flag values to meaningful flag names')
     parser.set_defaults(set_flag_names=False)
     parser.add_argument('--set_nodata_nan', dest='set_nodata_nan', action='store_true', help='Set output nodata to nan')
@@ -619,29 +926,9 @@ def main():
 
     args = parser.parse_args()
 
+    # Moved data validation bit to function
 
-    if str(args.input).endswith('.h5'):
-        pass
-    else:
-        print("INPUT ICESAT2 FILE MUST END '.H5'")
-        os._exit(1)
-    if args.output == None:
-        print("\n OUTPUT DIR IS NOT SPECIFIED (OPTIONAL). OUTPUT WILL BE PLACED IN THE SAME LOCATION AS INPUT H5 \n\n")
-    else:
-        pass
-    if args.resolution == None:
-        print("SPECIFY OUTPUT RASTER RESOLUTION IN METERS'")
-        os._exit(1)
-    else:
-        pass
-
-    if args.filter_geo:
-        print("Min lat: {}".format(args.minlat))
-        print("Max lat: {}".format(args.maxlat))
-        print("Min lon: {}".format(args.minlon))
-        print("Max lon: {}".format(args.maxlon))
-
-    print(f'Month range: {args.minmonth}-{args.maxmonth}')
+#    print(f'Month range: {args.minmonth}-{args.maxmonth}')
 
     extract_atl08(args)
 

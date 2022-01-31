@@ -45,7 +45,7 @@ def prep_filter_atl08_qual(atl08):
     print("\nPre-filter data cleaning...")
 
     print(atl08.head()) 
-    print(print(pd.__version__))
+    print(pd.__version__)
 
     # This always worked when running on MAAP: pandas 1.2.2
     # This doesnt work with pandas 1.3.3 or pandas 1.2.2 on ADAPT
@@ -283,7 +283,6 @@ def filter_atl08_qual(input_fn=None, subset_cols_list=['rh25','rh50','rh60','rh7
                              ['beam_type', 'Strong'],
                              ['seg_snow' , 1] #'snow free land'
                         ]
-
     atl08_df_filt = atl08_df_prepd
     for flag, val in filt_params_static:
         atl08_df_filt = atl08_df_filt[atl08_df_filt[flag] == val]

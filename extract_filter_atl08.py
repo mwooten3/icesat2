@@ -157,7 +157,7 @@ def extract_atl08(args):
         temp = np.empty_like(Arrtemp, dtype='a255')
         temp[...] = DOY
         d.append(temp)
-
+    import pdb; pdb.set_trace()
     dt.append(f['/ancillary_data/granule_end_utc/'][...,].tolist())
     orb_orient.append(f['/orbit_info/sc_orient/'][...,].tolist())
     orb_num.append(f['/orbit_info/orbit_number/'][...,].tolist())
@@ -526,7 +526,7 @@ def extract_atl08(args):
                                                  3: "Low conf. cloudy skies", 4: "Medium conf. cloudy skies", 5: "High conf. cloudy skies"})
         out['night_flg'] = out['night_flg'].map({0: "day", 1: "night"})
         #out['tcc_flg'] = out['tcc_flg'].map({0: "=<5%", 1: ">5%"})
-                                         
+                                     
     # Bin tcc values                                     
     tcc_bins = [0,10,20,30,40,50,60,70,80,90,100]
     out['tcc_bin'] = pd.cut(out['tcc_prc'], bins=tcc_bins, labels=tcc_bins[1:])
@@ -536,7 +536,7 @@ def extract_atl08(args):
         print('Quality Filtering: \t\t[ON]')
 
         import FilterUtils
-	
+
         # These filters are customized for boreal
         out = FilterUtils.prep_filter_atl08_qual(out)
         out = FilterUtils.filter_atl08_qual_v2(out, SUBSET_COLS=True, DO_PREP=False,
@@ -568,6 +568,7 @@ def extract_atl08(args):
 
 
 def main():
+    print("\nBEGIN: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S")))
     print("\nWritten by:\n\tNathan Thomas\t| @Nmt28\n\tPaul Montesano\t| paul.m.montesano@nasa.gov\n")
                                          
     class Range(object):
@@ -641,9 +642,12 @@ def main():
         print("Min lon: {}".format(args.minlon))
         print("Max lon: {}".format(args.maxlon))
 
-    print(f'Month range: {args.minmonth}-{args.maxmonth}')
+    print('Month range: {args.minmonth}-{args.maxmonth}')
+
+
 
     extract_atl08(args)
+    print("\nEND: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S")))
 
 
 if __name__ == "__main__":
