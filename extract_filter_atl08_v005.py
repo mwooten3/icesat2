@@ -35,7 +35,7 @@ import h5py
 import numpy as np
 import pandas as pd
 #import subprocess
-import os
+import os, sys
 import math
 
 import argparse
@@ -43,8 +43,25 @@ import argparse
 import time
 from datetime import datetime
 
+def calculateElapsedTime(start, end, unit = 'minutes'):
+    
+    # start and end = time.time()
+    
+    if unit == 'minutes':
+        elapsedTime = round((time.time()-start)/60, 4)
+    elif unit == 'hours':
+        elapsedTime = round((time.time()-start)/60/60, 4)
+    else:
+        elapsedTime = round((time.time()-start), 4)  
+        unit = 'seconds'
+        
+    #print("\nEnd: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
+    print("Elapsed time: {} {}".format(elapsedTime, unit))
+    
+    return None
+
 # Added 1/25/22
-def getUniqueId(lon, lat, date, segment):
+def getUniqueId(lon, lat, date):
     
     import math
 
@@ -77,15 +94,20 @@ def getUniqueId(lon, lat, date, segment):
     # To ensure all uniqueIDs are the same length, pad end with 0s
     while len(idLon) < 10: idLon = '{}0'.format(idLon)
     while len(idLat) < 10: idLat = '{}0'.format(idLat)
-    
-    # And pad 20m segment with 0 to left
-    while len(str(segment)) < 3: segment = '0{}'.format(segment)
         
     # Put them together
-    #108W324536-76N2836387-20190828-20 --> center lon is -108.324536; center lat is 76.2836387; date is 2019-08-28; 20m segment
-    uID = '{}-{}-{}-{}'.format(idLon, idLat, idDate, segment)
+    #108W324536-76N2836387-20190828 --> center lon is -108.324536; center lat is 76.2836387; date is 2019-08-28
+    uID = '{}-{}-{}'.format(idLon, idLat, idDate)
     
     return uID
+
+def logOutput(logdir, bname, mode):
+
+    os.system('mkdir -p {}'.format(logdir))
+    logfile = os.path.join(logdir, '{}__extractLog.txt'.format(bname))
+    sys.stdout = open(logfile, mode)
+
+    return None
 
 def reconfigureArrays(inDict):
     
@@ -119,29 +141,8 @@ def rec_merge1(d1, d2):
     d3.update(d2)
     return d3
 
-def calculateElapsedTime(start, end, unit = 'minutes'):
-    
-    # start and end = time.time()
-    
-    if unit == 'minutes':
-        elapsedTime = round((time.time()-start)/60, 4)
-    elif unit == 'hours':
-        elapsedTime = round((time.time()-start)/60/60, 4)
-    else:
-        elapsedTime = round((time.time()-start), 4)  
-        unit = 'seconds'
-        
-    #print("\nEnd: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
-    print("Elapsed time: {} {}".format(elapsedTime, unit))
-    
-    return None
-
 def extract_atl08(args):
-    
-      # Start clock
-    start = time.time()
-    print("\nBegin: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
-    
+   
     # Input sanitization
     if str(args.input).endswith('.h5'):
         pass
@@ -156,13 +157,7 @@ def extract_atl08(args):
         print("SPECIFY OUTPUT RASTER RESOLUTION IN METERS'")
         os._exit(1)
     else:
-        pass
-
-    if args.filter_geo:
-        print("Min lat: {}".format(args.minlat))
-        print("Max lat: {}".format(args.maxlat))
-        print("Min lon: {}".format(args.minlon))
-        print("Max lon: {}".format(args.maxlon))  
+        pass 
 
     TEST = args.TEST
     do_20m = args.do_20m
@@ -176,11 +171,25 @@ def extract_atl08(args):
 
     if args.output == None:
         outbase = os.path.join(inDir, Name)
+        logdir  = os.path.join(inDir, '_logs')
     else:
         outbase = os.path.join(args.output, Name)
-        
+        logdir  = os.path.join(args.output, '_logs')
+
+    # Log output if arg supplied        
+    if args.logging: logOutput(logdir, Name, mode = "a")
+
+    # Start clock
+    start = time.time()
+    print("\nBegin: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
     print("\nATL08 granule name: \t{}".format(Name))
-    print("Input dir: \t\t{}".format(inDir))
+    print("Input dir: \t\t{}\n".format(inDir))
+    
+    if args.filter_geo:
+        print("Min lat: {}".format(args.minlat))
+        print("Max lat: {}".format(args.maxlat))
+        print("Min lon: {}".format(args.minlon))
+        print("Max lon: {}\n".format(args.maxlon)) 
 
     if args.overwrite:
         # Overwite is True (on)
@@ -248,6 +257,7 @@ def extract_atl08(args):
         longitude_20m = []
         h_can_20m = []
         h_te_best_20m = []
+        seg20_id = []
 
     # Uncertainty fields
     n_seg_ph = []   # Number of photons within each land segment.
@@ -354,6 +364,15 @@ def extract_atl08(args):
             latitude_20m.append(f['/' + line    + land_seg_path + 'latitude_20m/'][...,].tolist())
             longitude_20m.append(f['/' + line   + land_seg_path + 'longitude_20m/'][...,].tolist())
             h_can_20m.append(f['/' + line       + '/land_segments/canopy/h_canopy_20m'][...,].tolist())
+
+            # Build the segment ID column using latitude array:            
+            n_20m = len(f['/' + line    + land_seg_path + 'latitude_20m/'][...,].tolist()) # number of 20m segment shots in line
+            segList = [1, 2, 3, 4, 5]
+            seg20_id.append([segList for i in range(n_20m)]) # list created in append will be same size/shape as other 20m lists 
+            
+            #seg20_id = np.copy(latitude_20m)
+            #for i in range(len(seg20_id[0])): seg20_id[0][i] = np.array([1, 2, 3, 4, 5])
+            #seg20_id[0] = np.array(['1', '2', '3', '4', '5']) # No clue why this works TBH
             
             """
             can_h_met_0.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_25/'][...,].tolist() )
@@ -467,6 +486,7 @@ def extract_atl08(args):
         longitude_20m = np.array([longitude_20m[l][k] for l in range(nLines) for k in range(len(longitude_20m[l]))])
         h_can_20m     = np.array([h_can_20m[l][k] for l in range(nLines) for k in range(len(h_can_20m[l]))])
         h_te_best_20m = np.array([h_te_best_20m[l][k] for l in range(nLines) for k in range(len(h_te_best_20m[l]))])
+        seg20_id      = np.array([seg20_id[l][k] for l in range(nLines) for k in range(len(seg20_id[l]))])
         
         """
         can_h_met_0 = np.array([can_h_met_0[l][k] for l in range(nLines) for k in range(len(can_h_met_0[l]))])
@@ -563,7 +583,7 @@ def extract_atl08(args):
         print('Raster Y (' + str(args.resolution) + ' m) Resolution at ' + str(CenterLat) + ' degrees N = ' + str(pixelSpacingInDegreeY))
 
     # Create a handy ID label for each point - this will be repeated if do_20m is True
-    fid = np.arange(1, len(h_max_can)+1, 1)
+    #fid = np.arange(1, len(h_max_can)+1, 1)
 
     if TEST:
         print("\nSet up a dataframe dictionary...")
@@ -572,7 +592,7 @@ def extract_atl08(args):
     
     # 1/21/22: Instead of having separate 100m/20m dicts, add to dictionaries if do_20m is True    
     dict_orb_gt_seg = {
-                    'fid_100m'  :fid,
+                    #'fid_100m'  :fid,
                     'lon'       :longitude,
                     'lat'       :latitude,
                     #'yr'        :np.full(longitude.shape, yr[0]),
@@ -653,6 +673,7 @@ def extract_atl08(args):
     if do_20m:
         dict_orb_gt_seg['lon_20m'] = longitude_20m
         dict_orb_gt_seg['lat_20m'] = latitude_20m
+        dict_orb_gt_seg['segment_20m'] = seg20_id
         
         dict_rh_metrics['h_can_20m'] = h_can_20m
         
@@ -740,7 +761,7 @@ def extract_atl08(args):
     """
     # First, get one big dictionary for all value types
     outDict = rec_merge1(dict_orb_gt_seg, rec_merge1(dict_rh_metrics, dict_other_fields))
-    
+
     # 1/24/22 - Added portion here to configure arrays if 20_20m is True
     # If we are not adding 20m segments, all arrays in outDict will be of shape
     # (X,) [aka ndims = 1], so no edits need to be made before DF creation
@@ -855,11 +876,11 @@ def extract_atl08(args):
         
     # 1/25/22: After filtering, get the uniqueID columns in DF
 
-    getUniqueId(out['lon'].iloc[0], out['lat'].iloc[0], out['dt'].iloc[0], 100)
-    import pdb;pdb.set_trace()
-    out['uID_100m'] = out.apply(lambda row: getUniqueId(row['lon'], row['lat'], row['dt'], 100), axis=1)
-    if do_20m:
-        out['uID_20m'] = out.apply(lambda row: getUniqueId(row['lon_20m'], row['lat_20m'], row['dt'], 20), axis=1)
+    #getUniqueId(out['lon'].iloc[0], out['lat'].iloc[0], out['dt'].iloc[0], 100)
+    #import pdb;pdb.set_trace()
+    out['uID'] = out.apply(lambda row: getUniqueId(row['lon'], row['lat'], row['dt']), axis=1)
+    #if do_20m: # just doing 1-5 for 20m seg
+      #  out['uID_20m'] = out.apply(lambda row: getUniqueId(row['lon_20m'], row['lat_20m'], row['dt'], 20), axis=1)
         
 
     if out.empty:
@@ -867,15 +888,16 @@ def extract_atl08(args):
     else:
         # Write out to a csv
         out_csv_fn = os.path.join(outbase + fn_tail)
-        print('Creating CSV: \t\t{}'.format(out_csv_fn))
+        print('\nWriting {} rows to CSV: {}'.format(len(out), out_csv_fn))
         out.to_csv(out_csv_fn,index=False, encoding="utf-8-sig")
         
     print("\nEnd: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))        
     calculateElapsedTime(start, time.time())
-
+    
+    sys.stdout.close()
 
 def main():
-    print("\nWritten by:\n\tNathan Thomas\t| @Nmt28\n\tPaul Montesano\t| paul.m.montesano@nasa.gov\n")
+    #print("\nWritten by:\n\tNathan Thomas\t| @Nmt28\n\tPaul Montesano\t| paul.m.montesano@nasa.gov\n")
                                          
     class Range(object):
         def __init__(self, start, end):
@@ -922,7 +944,8 @@ def main():
     parser.set_defaults(set_nodata_nan=False)
     parser.add_argument('--TEST', dest='TEST', action='store_true', help='Turn on testing')
     parser.set_defaults(TEST=False)
-    
+    parser.add_argument('--log', dest='logging', action='store_true', help='Turn on output logging to file')
+    parser.set_defaults(logging=False)    
 
     args = parser.parse_args()
 
