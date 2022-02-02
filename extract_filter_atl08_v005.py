@@ -653,7 +653,7 @@ def extract_atl08(args):
     
     # Create DF from dictionary
     out = pd.DataFrame(outDict)
-    import pdb; pdb.set_trace()    
+  
     print("Setting pandas df nodata values to np.nan for some basic eval.")
     out = out.replace(val_nodata_src, np.nan)
    
@@ -736,7 +736,7 @@ def extract_atl08(args):
         out = FilterUtils.prep_filter_atl08_qual(out)
         out = FilterUtils.filter_atl08_qual_v2(out, SUBSET_COLS=False, DO_PREP=False,
                                                    subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh90','h_can','h_max_can','seg_landcov','night_flg','seg_water','sol_el','asr','ter_slp', 'ter_flg','y','m','d'], 
-                                                   filt_cols=['h_can','h_dif_ref','m','msw_flg','beam_type','seg_snow','sig_topo'], 
+                                                   filt_cols=['h_can','h_dif_ref','month','msw_flg','beam_type','seg_snow','sig_topo'], 
                                                    thresh_h_can=100, thresh_h_dif=25, thresh_sig_topo=2.5, month_min=args.minmonth, month_max=args.maxmonth)
 
     else:

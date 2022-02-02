@@ -211,7 +211,7 @@ def filter_atl08_bounds(atl08_df=None, in_bounds=None, in_ept_fn=None, in_tile_f
         print(out_fn)
         return(out_fn)
 
-def filter_atl08_qual(input_fn=None, subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh85','rh90','rh95','h_can','h_max_can'], filt_cols =['h_can','h_dif_ref','m','msw_flg','beam_type','seg_snow'], thresh_h_can=None, thresh_h_dif=None, month_min=None, month_max=None, SUBSET_COLS=True, DO_PREP=True):
+def filter_atl08_qual(input_fn=None, subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh85','rh90','rh95','h_can','h_max_can'], filt_cols =['h_can','h_dif_ref','month','msw_flg','beam_type','seg_snow'], thresh_h_can=None, thresh_h_dif=None, month_min=None, month_max=None, SUBSET_COLS=True, DO_PREP=True):
     '''
     Quality filtering Function
     Returns a data frame
@@ -251,7 +251,7 @@ def filter_atl08_qual(input_fn=None, subset_cols_list=['rh25','rh50','rh60','rh7
     else:
         atl08_df_prepd = atl08_df
     
-    
+
     # Check that you have the cols that are required for the filter
     filt_cols_not_in_df = [col for col in filt_cols if col not in atl08_df_prepd.columns] 
     if len(filt_cols_not_in_df) > 0:
@@ -309,7 +309,7 @@ def filter_atl08_qual(input_fn=None, subset_cols_list=['rh25','rh50','rh60','rh7
         print("\tFiltered obs. for all columns")
         return(atl08_df_filt)
     
-def filter_atl08_qual_v2(input_fn=None, subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh85','rh90','rh95','h_can','h_max_can'], filt_cols =['h_can','h_dif_ref','m','msw_flg','beam_type','seg_snow', 'sig_topo'], thresh_sig_topo=None, thresh_h_can=None, thresh_h_dif=None, month_min=None, month_max=None, SUBSET_COLS=True, DO_PREP=True):
+def filter_atl08_qual_v2(input_fn=None, subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh85','rh90','rh95','h_can','h_max_can'], filt_cols =['h_can','h_dif_ref','month','msw_flg','beam_type','seg_snow', 'sig_topo'], thresh_sig_topo=None, thresh_h_can=None, thresh_h_dif=None, month_min=None, month_max=None, SUBSET_COLS=True, DO_PREP=True):
     '''
     Quality filtering Function(Version 2)
     Returns a data frame
@@ -384,8 +384,8 @@ def filter_atl08_qual_v2(input_fn=None, subset_cols_list=['rh25','rh50','rh60','
                                 (atl08_df_filt.sig_topo < thresh_sig_topo) &
                                 (atl08_df_filt.h_can < thresh_h_can) &
                                 (atl08_df_filt.h_dif_ref < thresh_h_dif) &
-                                (atl08_df_filt.m >= month_min ) & 
-                                (atl08_df_filt.m <= month_max) 
+                                (atl08_df_filt.month >= month_min ) & 
+                                (atl08_df_filt.month <= month_max) 
                     ]    
     
     print(f"\tAfter all quality filtering: \t\t{atl08_df_filt.shape[0]} observations in the output dataframe.")
