@@ -40,38 +40,8 @@ def calculateElapsedTime(start, end, unit = 'minutes'):
     
     return None
 
-def create_atl08_index(args):
-
-    # Start clock
-    start = time.time()
-    
-    #TEST = args.TEST
-    
-    # File path to ICESat-2h5 file
-    H5 = args.input
-    
-    # Get the filepath where the H5 is stored and filename
-    #inDir = '/'.join(H5.split('/')[:-1])
-    Name = H5.split('/')[-1].split('.')[0]
-
-    if not args.output.endswith('.csv'):
-        print("Output .csv file must be supplied with -o")
-        return None
-    
-    else:
-        outCsv = args.output
-            
-    #print("\nATL08 granule name: \t{}".format(Name))
-    #print("Input dir: \t\t{}".format(inDir))
-
-    args.overwrite = False # Not the right way but force overwrite tobe False for this
-    if os.path.isfile(outCsv) and not args.overwrite: # File exists and we are not overwriting
-        #print("{} exists so we are appending (no guarantee there won't be duplicates)".format(outCsv))
-        pass # Do nothing else, continue
-    else: # either file exists and we are overwriting, or file does not exist - write hdr
-        with open(outCsv, 'w') as oc: # Write header
-            oc.write('ATL08_File,xmin,ymin,xmax,ymax\n')
-            
+   
+def get_lat_lon_df(H5):       
 
     
     land_seg_path = '/land_segments/' # Now, everything point-specific (for 100m or 20m segments) is within this tag
@@ -114,22 +84,58 @@ def create_atl08_index(args):
                  'lon': longitude                             
             }
     
-
     #print("\nBuilding pandas dataframe...")
 
     # Create DF from dictionary
     out = pd.DataFrame(indexDict)
+
+    return out
+    
+def create_atl08_index(args):
+
+    # Start clock
+    #start = time.time()
+    
+    #TEST = args.TEST
+    
+    if not args.output.endswith('.csv'):
+        print("Output .csv file must be supplied with -o")
+        return None
+    
+    else:
+        outCsv = args.output
+            
+    #print("\nATL08 granule name: \t{}".format(Name))
+    #print("Input dir: \t\t{}".format(inDir))
+
+    args.overwrite = False # Not the right way but force overwrite tobe False for this
+    if os.path.isfile(outCsv) and not args.overwrite: # File exists and we are not overwriting
+        #print("{} exists so we are appending (no guarantee there won't be duplicates)".format(outCsv))
+        pass # Do nothing else, continue
+    else: # either file exists and we are overwriting, or file does not exist - write hdr
+        with open(outCsv, 'w') as oc: # Write header
+            oc.write('ATL08_File,xmin,ymin,xmax,ymax\n') 
+            
+    # File path to ICESat-2h5 file
+    H5 = args.input
+    
+    # Get the filepath where the H5 is stored and filename
+    #inDir = '/'.join(H5.split('/')[:-1])
+    Name = H5.split('/')[-1].split('.')[0] 
+    
+    out = get_lat_lon_df(H5)
+    
     xmin = out['lon'].min()
     ymin = out['lat'].min()
     xmax = out['lon'].max()
     ymax = out['lat'].max()
+    
     
     # Get min/max extent
     outRow = '{},{},{},{},{}\n'.format(Name, xmin, ymin, xmax, ymax)
 
     with open(outCsv, 'a') as oc: # Write header
         oc.write(outRow)
-    
 
     #calculateElapsedTime(start, time.time(), 'seconds')
     
