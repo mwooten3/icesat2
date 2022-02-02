@@ -29,6 +29,12 @@
 # - Adding code to get min/max of unfiltered data and return (outCSV, extent)
     # so it can be written to .csv in wrapper code
 # - Adding logging option for runs
+    
+#2/2/22:
+# - Removed fid field because it was pointless with our uID field
+# - Changed field names to be a little more descriptive - very few changes
+# - Added include_lowest=True to tcc_bin mapping portion so 0% tcc gets binned to 10 not NaN
+# - Cleaned up old code from previous version (can reference extract_filter_atl08.py if need be)
 
 import h5py
 #from osgeo import gdal
@@ -107,7 +113,7 @@ def logOutput(logdir, bname, mode):
     logfile = os.path.join(logdir, '{}__extractLog.txt'.format(bname))
     sys.stdout = open(logfile, mode)
 
-    return None
+    return sys.stdout
 
 def reconfigureArrays(inDict):
     
@@ -177,7 +183,8 @@ def extract_atl08(args):
         logdir  = os.path.join(args.output, '_logs')
 
     # Log output if arg supplied        
-    if args.logging: logOutput(logdir, Name, mode = "a")
+    if args.logging: 
+        sys.stdout = logOutput(logdir, Name, mode = "a")
 
     # Start clock
     start = time.time()
@@ -203,17 +210,7 @@ def extract_atl08(args):
             # Overwite is False (off) but file DOES NOT exist
             pass
 
-    # 1/21/22: Most of this is not needed as 20m segments are stored totally different
-    """
-    land_seg_path = '/land_segments/'
-    if do_30m:
-        segment_length = 30
-        land_seg_path = land_seg_path + str(segment_length) + 'm_segment/'
-    else:
-        segment_length = 100
-        
-    fn_tail = '_' + str(segment_length) + 'm.csv'
-    """
+    # 1/21/22: Probably unnecessary but keep it
     land_seg_path = '/land_segments/' # Now, everything point-specific (for 100m or 20m segments) is within this tag
     if do_20m:
         segment_length = 20
@@ -326,9 +323,6 @@ def extract_atl08(args):
     orb_num.append(f['/orbit_info/orbit_number/'][...,].tolist())
     rgt.append(f['/orbit_info/rgt/'][...,].tolist())
 
-    #yr          =np.array([yr[l][k] for l in range(1) for k in range(len(yr[l]))] )
-    #m           =np.array([m[l][k] for l in range(1) for k in range(len(m[l]))] )
-    #d           =np.array([d[l][k] for l in range(1) for k in range(len(d[l]))] )
     dt          =np.array([dt[l][k] for l in range(1) for k in range(len(dt[l]))] )    
     orb_orient  =np.array([orb_orient[l][k] for l in range(1) for k in range(len(orb_orient[l]))] )
     orb_num     =np.array([orb_num[l][k] for l in range(1) for k in range(len(orb_num[l]))] )
@@ -374,34 +368,9 @@ def extract_atl08(args):
             #for i in range(len(seg20_id[0])): seg20_id[0][i] = np.array([1, 2, 3, 4, 5])
             #seg20_id[0] = np.array(['1', '2', '3', '4', '5']) # No clue why this works TBH
             
-            """
-            can_h_met_0.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_25/'][...,].tolist() )
-            can_h_met_1.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_30/'][...,].tolist() )
-            can_h_met_2.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_40/'][...,].tolist() )
-            can_h_met_3.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_50/'][...,].tolist() )
-            can_h_met_4.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_60/'][...,].tolist() )
-            can_h_met_5.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_70/'][...,].tolist() )
-            can_h_met_6.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_75/'][...,].tolist() )
-            can_h_met_7.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_80/'][...,].tolist() )
-            can_h_met_8.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_90/'][...,].tolist() )
-                        
-            if TEST:
-                pass
-                #print(len(can_h_met_0), len(can_h_met_1), len(can_h_met_2))
+            # Erased old chunk here (can_met array stuff and testing block)
             
-            # The following is not 20m specific and as such should be done regardless of if do_20m 
-            h_max_can.append(f['/' + line   + '/land_segments/30m_segment/atl03_rh_100/'][...,].tolist())
-            h_can.append(f['/' + line       + '/land_segments/30m_segment/atl03_rh_98/'][...,].tolist())
-            
-            n_ca_ph.append(f['/' + line     + '/land_segments/30m_segment/n_ca_photons/'][...,].tolist())
-            n_toc_ph.append(f['/' + line    + '/land_segments/30m_segment/n_toc_photons/'][...,].tolist())
-            can_open.append(f['/' + line    + '/land_segments/30m_segment/canopy_openness/'][...,].tolist())
-            # 1/21/22 Changes - no tcc for do_20m
-            #tcc_flg.append(f['/' + line     + '/land_segments/30m_segment/landsat_flag/'][...,].tolist())
-            #tcc_prc.append(f['/' + line     + '/land_segments/30m_segment/landsat_perc/'][...,].tolist())
-            """ 
-        # 1/21/22 *Instead of if/else, we want 20m-specific info to be done in *addition* to 100m, not instead of
-        
+        # 1/21/22 *Instead of if/else, we want 20m-specific info to be done in *addition* to 100m, not instead of 
         can_h_met.append(f['/' + line   + '/land_segments/canopy/canopy_h_metrics/'][...,].tolist())
         
         h_max_can.append(f['/' + line   + '/land_segments/canopy/h_max_canopy/'][...,].tolist())
@@ -410,13 +379,10 @@ def extract_atl08(args):
         n_ca_ph.append(f['/' + line     + '/land_segments/canopy/n_ca_photons/'][...,].tolist())
         n_toc_ph.append(f['/' + line    + '/land_segments/canopy/n_toc_photons/'][...,].tolist())
         can_open.append(f['/' + line    + '/land_segments/canopy/canopy_openness/'][...,].tolist())
-        # 1/21/22 Changes - new flag to tcc_prc
-        #tcc_flg.append(f['/' + line     + '/land_segments/canopy/landsat_flag/'][...,].tolist())
-        #tcc_prc.append(f['/' + line     + '/land_segments/canopy/landsat_perc/'][...,].tolist())
-        tcc_prc.append(f['/' + line     + '/land_segments/canopy/segment_cover/'][...,].tolist())
-      
+        
+        tcc_prc.append(f['/' + line     + '/land_segments/canopy/segment_cover/'][...,].tolist()) # 1/21/22 Changes - new tags for tcc_prc, rm tcc_flg
     
-        # Uncertinaty fields
+        # Uncertainty fields
         cloud_flg.append(f['/' + line   + land_seg_path + 'cloud_flag_atm/'][...,].tolist())
         msw_flg.append(f['/' + line     + land_seg_path + 'msw_flag/'][...,].tolist())
         n_seg_ph.append(f['/' + line    + land_seg_path + 'n_seg_ph/'][...,].tolist())
@@ -432,12 +398,10 @@ def extract_atl08(args):
 
         # Terrain fields
         # 1/21/22: Same thing as above. Only one terrain field is 20m specific, so do it in addition to, not instead of
+        # Erased some stuff/changed if-else block to only if
         if do_20m:
-            #n_te_ph.append(f['/' + line     + '/land_segments/30m_segment/n_te_photons/'][...,].tolist())
             h_te_best_20m.append(f['/' + line   + '/land_segments/terrain/h_te_best_fit_20m'][...,].tolist())
-            #h_te_unc.append(f['/' + line    + '/land_segments/30m_segment/h_te_uncertainty/'][...,].tolist())
-            #ter_slp.append(f['/' + line     + '/land_segments/30m_segment/terrain_slope/'][...,].tolist())
-        #else:
+
         n_te_ph.append(f['/' + line     + '/land_segments/terrain/n_te_photons/'][...,].tolist())
         h_te_best.append(f['/' + line   + '/land_segments/terrain/h_te_best_fit/'][...,].tolist())
         h_te_unc.append(f['/' + line    + '/land_segments/terrain/h_te_uncertainty/'][...,].tolist())
@@ -455,7 +419,7 @@ def extract_atl08(args):
         seg_wmask.append(f['/' + line   + land_seg_path + 'segment_watermask/'][...,].tolist())
         lyr_flg.append(f['/' + line     + land_seg_path + 'layer_flag/'][...,].tolist())
     
-    # MW 3/31: Originally a length of 6 was hardcoded into the below calculations because the
+    # MW 3/31/21: Originally a length of 6 was hardcoded into the below calculations because the
     #          assumption was made that 6 lines/lasers worth of data was stored in the arrays. With
     #	       the above changes made to the beginning of the 'for line in lines' loop on 3/31, this
     #          assumption is no longer always true. Adding nLines var to replace range(6) below
@@ -464,9 +428,6 @@ def extract_atl08(args):
     # Be sure at least one of the lasers/lines for the h5 file had data points - MW added block 3/31
     if nLines == 0:
         return None # No usable points in h5 file, can't process
-    if TEST:
-        pass
-        #print("Convert the list of lists into a single list...")
         
     latitude    =np.array([latitude[l][k] for l in range(nLines) for k in range(len(latitude[l]))] )
     longitude   =np.array([longitude[l][k] for l in range(nLines) for k in range(len(longitude[l]))] )
@@ -486,20 +447,9 @@ def extract_atl08(args):
         longitude_20m = np.array([longitude_20m[l][k] for l in range(nLines) for k in range(len(longitude_20m[l]))])
         h_can_20m     = np.array([h_can_20m[l][k] for l in range(nLines) for k in range(len(h_can_20m[l]))])
         h_te_best_20m = np.array([h_te_best_20m[l][k] for l in range(nLines) for k in range(len(h_te_best_20m[l]))])
-        seg20_id      = np.array([seg20_id[l][k] for l in range(nLines) for k in range(len(seg20_id[l]))])
-        
-        """
-        can_h_met_0 = np.array([can_h_met_0[l][k] for l in range(nLines) for k in range(len(can_h_met_0[l]))])
-        can_h_met_1 = np.array([can_h_met_1[l][k] for l in range(nLines) for k in range(len(can_h_met_1[l]))])
-        can_h_met_2 = np.array([can_h_met_2[l][k] for l in range(nLines) for k in range(len(can_h_met_2[l]))])
-        can_h_met_3 = np.array([can_h_met_3[l][k] for l in range(nLines) for k in range(len(can_h_met_3[l]))])
-        can_h_met_4 = np.array([can_h_met_4[l][k] for l in range(nLines) for k in range(len(can_h_met_4[l]))])
-        can_h_met_5 = np.array([can_h_met_5[l][k] for l in range(nLines) for k in range(len(can_h_met_5[l]))])
-        can_h_met_6 = np.array([can_h_met_6[l][k] for l in range(nLines) for k in range(len(can_h_met_6[l]))])
-        can_h_met_7 = np.array([can_h_met_7[l][k] for l in range(nLines) for k in range(len(can_h_met_7[l]))])
-        can_h_met_8 = np.array([can_h_met_8[l][k] for l in range(nLines) for k in range(len(can_h_met_8[l]))])
-        """
-    #else: # not instead of 20m, but in addition to
+        seg20_id      = np.array([seg20_id[l][k] for l in range(nLines) for k in range(len(seg20_id[l]))])        
+        # erased can_met array stuff, changed if-else block to only if (not instead of 20m, but in addition to)
+
     can_h_met = np.array([can_h_met[l][k] for l in range(nLines) for k in range(len(can_h_met[l]))])
         
     n_ca_ph     =np.array([n_ca_ph[l][k] for l in range(nLines) for k in range(len(n_ca_ph[l]))] )
@@ -543,8 +493,7 @@ def extract_atl08(args):
     val_nodata_src = np.max(h_can)
     print("Find src nodata value using max of h_can: \t{}".format(val_nodata_src))
     
-    if TEST:
-        
+    if TEST:       
         # Testing with 'h_can'
         
         print("\n\tNan used for 30m version, not for 100m version.")
@@ -679,90 +628,16 @@ def extract_atl08(args):
         
         dict_other_fields['h_te_best_20m'] = h_te_best_20m            
     
-    # OLD CODE
-    """
-    if do_20m:
-        dict_rh_metrics_30m = {
-                        'h_max_can' :h_max_can,
-                        'h_can'     :h_can,
-                        
-                        'rh25'      :can_h_met_0,
-                        'rh30'      :can_h_met_1,
-                        'rh40'      :can_h_met_2,
-                        'rh50'      :can_h_met_3,
-                        'rh60'      :can_h_met_4,
-                        'rh70'      :can_h_met_5,
-                        'rh75'      :can_h_met_6,
-                        'rh80'      :can_h_met_7,
-                        'rh90'      :can_h_met_8     
-        }
-    else:
-        dict_rh_metrics_100m = {
-                        'h_max_can' :h_max_can,
-                        'h_can'     :h_can,
-
-                        'rh25'      :can_h_met[:,0],
-                        'rh50'      :can_h_met[:,1],
-                        'rh60'      :can_h_met[:,2],
-                        'rh70'      :can_h_met[:,3],
-                        'rh75'      :can_h_met[:,4],
-                        'rh80'      :can_h_met[:,5],
-                        'rh85'      :can_h_met[:,6],
-                        'rh90'      :can_h_met[:,7],
-                        'rh95'      :can_h_met[:,8]
-        }
-    dict_other_fields = {
-                    'n_ca_ph'   :n_ca_ph,
-                    'n_toc_ph'  :n_toc_ph,
-                    'can_open'  :can_open,
-                    #'tcc_flg'   :tcc_flg,
-                    'tcc_prc'   :tcc_prc,
-
-                    'cloud_flg' :cloud_flg,
-                    'msw_flg'   :msw_flg,
-                    'n_seg_ph'  :n_seg_ph,
-                    'night_flg' :night_flg,
-                    'seg_landcov':seg_landcov,
-                    'seg_snow'  :seg_snow,
-                    'seg_water' :seg_water,
-                    'sig_vert'  :sig_vert,
-                    'sig_acr'   :sig_acr,
-                    'sig_along' :sig_along,
-                    'sig_h'     :sig_h,
-                    'sig_topo'  :sig_topo,
-
-                    'n_te_ph'   :n_te_ph,
-                    'h_te_best' :h_te_best,
-                    'h_te_unc'  :h_te_unc,
-                    'ter_slp'   :ter_slp,
-                    'snr'       :snr,
-                    'sol_az'    :sol_az,
-                    'sol_el'    :sol_el,
-
-                    'asr'       :asr,
-                    'h_dif_ref' :h_dif_ref,
-                    'ter_flg'   :ter_flg,
-                    'ph_rem_flg':ph_rem_flg,
-                    'dem_rem_flg':dem_rem_flg,
-                    'seg_wmask' :seg_wmask,
-                    'lyr_flg'   :lyr_flg
-    }
-    """
-    
+    # Erased large chunk of old code for building dicts
 
     print("\nBuilding pandas dataframe...")
 
-    # 1/21/22: Already added any 20m entries to dataframes so no need for if/else   
-    """
-    if do_20m:
-        out=pd.DataFrame(rec_merge1(dict_orb_gt_seg, rec_merge1(dict_rh_metrics_30m,dict_other_fields)) )
-    else:
-        out=pd.DataFrame(rec_merge1(dict_orb_gt_seg, rec_merge1(dict_rh_metrics_100m,dict_other_fields)) )
-    """
+    # 1/21/22: Already added any 20m entries to dataframes so removed if/else   
+
     # First, get one big dictionary for all value types
     outDict = rec_merge1(dict_orb_gt_seg, rec_merge1(dict_rh_metrics, dict_other_fields))
 
-    # 1/24/22 - Added portion here to configure arrays if 20_20m is True
+    # 1/24/22 - Added portion here to configure arrays if do_20m is True
     # If we are not adding 20m segments, all arrays in outDict will be of shape
     # (X,) [aka ndims = 1], so no edits need to be made before DF creation
     
@@ -778,7 +653,7 @@ def extract_atl08(args):
     
     # Create DF from dictionary
     out = pd.DataFrame(outDict)
-    
+    import pdb; pdb.set_trace()    
     print("Setting pandas df nodata values to np.nan for some basic eval.")
     out = out.replace(val_nodata_src, np.nan)
    
@@ -798,7 +673,10 @@ def extract_atl08(args):
     print('# of ATL08 obs (h_can<0): \t{}'.format(len(out.h_can[
                                                                 (out.h_can.notnull() ) & 
                                                                 (out.h_can < 0) 
+
                                                                ])))
+    # if set_nodata_nan is True (default False) set NoData to nan
+    # if False, set it to the output NoData value (val_invalid)
     if args.set_nodata_nan:
         val_nodata_out = val_nan
     else:
@@ -829,8 +707,9 @@ def extract_atl08(args):
     'Urban_built_up', 'Snow_and_ice',
     'Permanent_water_bodies', 'Open_sea']
     """
+    # Set flag names - meaning, convert the numerical code to the descriptor. Default False - the below are wrong anyways now
     if args.set_flag_names:
-        # Set flag names
+        
         out['seg_landcov'] = out['seg_landcov'].map({0: "water", 1: "evergreen needleleaf forest", 2: "evergreen broadleaf forest", \
                                                      3: "deciduous needleleaf forest", 4: "deciduous broadleaf forest", \
                                                      5: "mixed forest", 6: "closed shrublands", 7: "open shrublands", \
@@ -843,9 +722,9 @@ def extract_atl08(args):
         out['night_flg'] = out['night_flg'].map({0: "day", 1: "night"})
         #out['tcc_flg'] = out['tcc_flg'].map({0: "=<5%", 1: ">5%"})
                                          
-    # Bin tcc values                                     
+    # Bin tcc values - 2/2/22 added include_lowest = True so tcc of 0% gets mapped to 10 bin rather than NaN                                     
     tcc_bins = [0,10,20,30,40,50,60,70,80,90,100]
-    out['tcc_bin'] = pd.cut(out['tcc_prc'], bins=tcc_bins, labels=tcc_bins[1:])
+    out['tcc_bin'] = pd.cut(out['tcc_prc'], bins=tcc_bins, labels=tcc_bins[1:], include_lowest=True)
     
     if args.filter_qual:
 
@@ -874,14 +753,10 @@ def extract_atl08(args):
     else:
         print('Geographic Filtering: \t[OFF] (do downstream)')
         
-    # 1/25/22: After filtering, get the uniqueID columns in DF
-
-    #getUniqueId(out['lon'].iloc[0], out['lat'].iloc[0], out['dt'].iloc[0], 100)
-    #import pdb;pdb.set_trace()
-    out['uID'] = out.apply(lambda row: getUniqueId(row['lon'], row['lat'], row['dt']), axis=1)
-    #if do_20m: # just doing 1-5 for 20m seg
-      #  out['uID_20m'] = out.apply(lambda row: getUniqueId(row['lon_20m'], row['lat_20m'], row['dt'], 20), axis=1)
-        
+    # 1/25/22: After filtering, get the uniqueID columns in DF using function
+    out['unique_id'] = out.apply(lambda row: getUniqueId(row['lon'], row['lat'], row['dt']), axis=1)
+    #if do_20m: # just doing 1-5 for 20m seg id now
+      #  out['uID_20m'] = out.apply(lambda row: getUniqueId(row['lon_20m'], row['lat_20m'], row['dt'], 20), axis=1)        
 
     if out.empty:
         print('File is empty.')
@@ -894,7 +769,7 @@ def extract_atl08(args):
     print("\nEnd: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))        
     calculateElapsedTime(start, time.time())
     
-    sys.stdout.close()
+    sys.stdout.close() # Close logging file
 
 def main():
     #print("\nWritten by:\n\tNathan Thomas\t| @Nmt28\n\tPaul Montesano\t| paul.m.montesano@nasa.gov\n")
