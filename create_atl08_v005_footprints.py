@@ -114,14 +114,9 @@ def atl08_toShp(bname, shpdir = '/att/gpfsfs/briskfs01/ppl/mwooten3/3DSI/ATL08_v
 
 def main():
     
-    debug = True # just adding extra print statements
+    debug = False # just adding extra print statements
 
     print("\nBegin: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
-    
-    #indexCsv = '/att/gpfsfs/briskfs01/ppl/mwooten3/3DSI/ATL08_v005/ATL08_v005_h5__extentIndex-test.csv'
-    #outShp = indexCsv.replace('extentIndex-test.csv', 'footprints.shp')
-    #outShp = '/att/gpfsfs/briskfs01/ppl/mwooten3/3DSI/ATL08_v005/_initial_ATL08_v005_h5__footprints-fixIssues1.shp'
-    #outShp = '/att/gpfsfs/briskfs01/ppl/mwooten3/3DSI/ATL08_v005/test-fprints.shp'
     
     indexCsv = '/att/gpfsfs/briskfs01/ppl/mwooten3/3DSI/ATL08_v005/ATL08_v005_h5__extentIndex.csv'
     outShp = indexCsv.replace('extentIndex.csv', 'footprints.shp')    
@@ -203,7 +198,7 @@ def main():
     
     # Save to .shp - need to append mode if file was already there and we skipped already processed files
     gdf.to_file(filename=outShp, driver="ESRI Shapefile", mode=writeMode)
-    print("\nWrote to .shp {} (Feature count now = {})".format(outShp, len(gdf.index))) 
+    print("\nWrote to .shp {} (Added {} features)".format(outShp, len(gdf.index))) 
     
     print("\nEnd: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
     
