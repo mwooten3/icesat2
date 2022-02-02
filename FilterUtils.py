@@ -66,9 +66,9 @@ def prep_filter_atl08_qual(atl08):
     print(f"\t\ttype integer: {cols_int}")
     atl08[cols_int] = atl08[cols_int].apply(pd.to_numeric, downcast='signed', errors='coerce')
     
-    atl08['y'] = pd.to_datetime(atl08['dt'].str.decode('utf-8').str.strip("b\'\"")).dt.year    
-    atl08['m'] = pd.to_datetime(atl08['dt'].str.decode('utf-8').str.strip("b\'\"")).dt.month
-    atl08['d'] = pd.to_datetime(atl08['dt'].str.decode('utf-8').str.strip("b\'\"")).dt.day
+    atl08['year'] = pd.to_datetime(atl08['dt'].str.decode('utf-8').str.strip("b\'\"")).dt.year    
+    atl08['month'] = pd.to_datetime(atl08['dt'].str.decode('utf-8').str.strip("b\'\"")).dt.month
+    atl08['day'] = pd.to_datetime(atl08['dt'].str.decode('utf-8').str.strip("b\'\"")).dt.day
           
     return(atl08)
 
