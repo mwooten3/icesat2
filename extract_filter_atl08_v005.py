@@ -66,8 +66,38 @@ def calculateElapsedTime(start, end, unit = 'minutes'):
     
     return None
 
+# From a dataframe's columns, reorder them based on hardcoded list
+# Hardcoded list will not have all the columns*, and it may have items that 
+#  aren't in df's columns [eg if not running 20m segments]
+# *Hardcoded list will focus on columns i know are important, any columns not
+#  in hardcoded list will reman in current order after the hardcoded ones
+def getOrderedColumns(df):
+
+    actualCols = df.columns.tolist() # columns actually in df
+ 
+    # Put these columns first, then append remaining fields to end
+    desiredOrder = ['id_unique', 'year', 'month', 'day', 'lon_20m', 'lat_20m', 
+                    'h_te_best_20m', 'h_can_20m', 'lon', 'lat', 'h_te_best',
+                     'h_can', 'h_te_unc', 'rh10', 'rh15', 'rh20', 'rh25', 'rh30', 
+                    'rh35','rh40', 'rh45', 'rh50', 'rh55', 'rh60', 'rh65', 
+                    'rh70', 'rh75', 'rh80', 'rh85', 'rh90', 'rh95', 'tcc_prc', 
+                    'tcc_bin', 'gt', 'beam_type', 'dt', 'id_100m', 'id_20m']
+ 
+    # Same as desiredOrder, as long as column was in df
+    colsOrdered = [d for d in desiredOrder if d in actualCols]
+    
+    # Add left out columns to list at end
+    remainingCols = [c for c in actualCols if c not in colsOrdered]
+    colsOrdered.extend(remainingCols)
+    
+    if len(colsOrdered) != len(actualCols):
+        print("Ordered columns are not same size as dataframe columns")
+        import pdb; pdb.set_trace()
+    
+    return colsOrdered    
+    
 # Added 1/25/22
-def getUniqueId(lon, lat, date):
+def get100mSegId(lon, lat, date):
     
     import math
 
@@ -103,9 +133,14 @@ def getUniqueId(lon, lat, date):
         
     # Put them together
     #108W324536-76N2836387-20190828 --> center lon is -108.324536; center lat is 76.2836387; date is 2019-08-28
-    uID = '{}-{}-{}'.format(idLon, idLat, idDate)
+    ID = '{}-{}-{}'.format(idLon, idLat, idDate)
     
-    return uID
+    return ID
+
+# This will only be called when do_20m is True, otherwise uniqueId = 100m segid
+def getUniqueId(id100, id20):
+    
+    return '{}-S{}'.format(id100, id20)
 
 def logOutput(logdir, bname, mode):
 
@@ -622,7 +657,7 @@ def extract_atl08(args):
     if do_20m:
         dict_orb_gt_seg['lon_20m'] = longitude_20m
         dict_orb_gt_seg['lat_20m'] = latitude_20m
-        dict_orb_gt_seg['segment_20m'] = seg20_id
+        dict_orb_gt_seg['id_20m'] = seg20_id
         
         dict_rh_metrics['h_can_20m'] = h_can_20m
         
@@ -752,11 +787,28 @@ def extract_atl08(args):
                  ]
     else:
         print('Geographic Filtering: \t[OFF] (do downstream)')
-        
+     
+    # GET UNIQUE ID FIELDS
     # 1/25/22: After filtering, get the uniqueID columns in DF using function
-    out['unique_id'] = out.apply(lambda row: getUniqueId(row['lon'], row['lat'], row['dt']), axis=1)
-    #if do_20m: # just doing 1-5 for 20m seg id now
-      #  out['uID_20m'] = out.apply(lambda row: getUniqueId(row['lon_20m'], row['lat_20m'], row['dt'], 20), axis=1)        
+    # 2/2/22 : If not doing 20m segments, unique_id = 100m segment ID
+    # If doing 20m segments, unique_id = 100m segment ID + 20m segment ID
+    # So 100m.csv will have just unique ID and 100m segment ID (which = unique ID)
+    # 20m.csv will have unique ID, 100m seg ID, 20m seg ID
+    out['id_100m'] = out.apply(lambda row: get100mSegId(row['lon'], row['lat'], row['dt']), axis=1)
+
+    # If doing 20m segments, then unique ID is combo of id_100m and id_20m
+    if do_20m: 
+        out['id_unique'] = out.apply(lambda row: getUniqueId(row['id_100m'], row['id_20m']), axis=1)
+    # Otherwise, then unique ID is just 100m id (yes this will add a duplicate
+    # column but it will allow us to have consisent unique ID column name)
+    else:
+        out['id_unique'] = out['id_100m']
+
+
+    # Lastly, try and reorder the columns before writing to .csv. 
+    # This part will have to be partially hardcoded - see function
+    colsOrdered = getOrderedColumns(out)
+    out = out[colsOrdered]
 
     if out.empty:
         print('File is empty.')
