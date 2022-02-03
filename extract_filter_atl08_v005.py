@@ -76,12 +76,17 @@ def getOrderedColumns(df):
     actualCols = df.columns.tolist() # columns actually in df
  
     # Put these columns first, then append remaining fields to end
-    desiredOrder = ['id_unique', 'year', 'month', 'day', 'lon_20m', 'lat_20m', 
-                    'h_te_best_20m', 'h_can_20m', 'lon', 'lat', 'h_te_best',
-                     'h_can', 'h_te_unc', 'rh10', 'rh15', 'rh20', 'rh25', 'rh30', 
-                    'rh35','rh40', 'rh45', 'rh50', 'rh55', 'rh60', 'rh65', 
-                    'rh70', 'rh75', 'rh80', 'rh85', 'rh90', 'rh95', 'tcc_prc', 
-                    'tcc_bin', 'gt', 'beam_type', 'dt', 'id_100m', 'id_20m']
+    desiredOrder = ['id_unique', 'year', 'month', 'day', 
+                    'lon_20m', 'lat_20m', 'h_can_20m', 'h_te_best_20m', 
+                    'lon', 'lat', 'h_can', 'h_max_can', 'h_can_quad', 
+                    'h_can_unc', 'h_te_best', 'h_te_unc', 'rh10', 
+                    'rh15', 'rh20', 'rh25', 'rh30', 'rh35','rh40', 'rh45', 
+                    'rh50', 'rh55', 'rh60', 'rh65', 'rh70', 'rh75', 'rh80',
+                    'rh85', 'rh90', 'rh95', 'can_rh_conf', 'h_dif_ref',
+                    'seg_landcov', 'seg_cover', 'seg_water', 'night_flg',
+                    'sol_el', 'asr', 'ter_slp', 'ter_flg', 'can_open', 
+                    'gt', 'beam_type', 'dt', 'id_100m', 'id_20m', 
+                    'granule_name']
  
     # Same as desiredOrder, as long as column was in df
     colsOrdered = [d for d in desiredOrder if d in actualCols]
@@ -208,7 +213,8 @@ def extract_atl08(args):
     
     # Get the filepath where the H5 is stored and filename
     inDir = '/'.join(H5.split('/')[:-1])
-    Name = H5.split('/')[-1].split('.')[0]
+    granule_fname = H5.split('/')[-1]
+    Name = granule_fname.split('.')[0]
 
     if args.output == None:
         outbase = os.path.join(inDir, Name)
@@ -218,8 +224,11 @@ def extract_atl08(args):
         logdir  = os.path.join(args.output, '_logs')
 
     # Log output if arg supplied        
-    if args.logging: 
-        sys.stdout = logOutput(logdir, Name, mode = "a")
+    if args.logging:
+        lname = '{}_100m'.format(Name)
+        if do_20m:
+            lname = lname.replace('_100m', '_20m')
+        sys.stdout = logOutput(logdir, lname, mode = "a")
 
     # Start clock
     start = time.time()
@@ -276,12 +285,17 @@ def extract_atl08(args):
     can_h_met = []   # Relative	(RH--)	canopy height	metrics calculated	at	the	following	percentiles: 25,50,	60,	70,	75,	80,	85,	90,	95
     h_max_can = []
     h_can = []      # 98% height of all the individual canopy relative heights for the segment above the estimated terrain surface. Relative canopy heights have been computed by differencing the canopy photon height from the estimated terrain surface.
+    h_can_quad = []
+    h_can_unc = []
+    
     n_ca_ph = []
     n_toc_ph = []
     can_open = []    # stdv of all photons classified as canopy within segment
-    # 1/21/22 Changes - remove tcc_flg ref; change tcc_prc comment
+    can_rh_conf = [] # Canopy relative height confidence flag based on percentage of ground and canopy photons within a segment: 0 (<5% canopy), 1 (>5% canopy, <5% ground), 2 (>5% canopy, >5% ground)
+   
+    # 1/21/22 Changes - remove tcc_flg and tcc_prc ref - use seg_cover
     #tcc_flg = [] # Flag indicating that more than 50% of the Landsat Continuous Cover product have values > 100 for the L-Km segment.  Canopy is assumed present along the L-km segment if landsat_flag is 1.
-    tcc_prc = [] # Average percentage value of the valid (value <= 100) Copernicus fractional cover product for each 100 m segment
+    seg_cover = [] # Average percentage value of the valid (value <= 100) Copernicus fractional cover product for each 100 m segment
 
     # 1/21/22: additional fields for 20m segments:
     if do_20m:
@@ -410,12 +424,15 @@ def extract_atl08(args):
         
         h_max_can.append(f['/' + line   + '/land_segments/canopy/h_max_canopy/'][...,].tolist())
         h_can.append(f['/' + line       + '/land_segments/canopy/h_canopy/'][...,].tolist())
-        
+        h_can_quad.append(f['/' + line  + '/land_segments/canopy/h_canopy_quad'][...,].tolist())
+        h_can_unc.append(f['/' + line   + '/land_segments/canopy/h_canopy_uncertainty'][...,].tolist())
+            
         n_ca_ph.append(f['/' + line     + '/land_segments/canopy/n_ca_photons/'][...,].tolist())
         n_toc_ph.append(f['/' + line    + '/land_segments/canopy/n_toc_photons/'][...,].tolist())
         can_open.append(f['/' + line    + '/land_segments/canopy/canopy_openness/'][...,].tolist())
+        can_rh_conf.append(f['/' + line + '/land_segments/canopy/canopy_rh_conf/'][...,].tolist())
         
-        tcc_prc.append(f['/' + line     + '/land_segments/canopy/segment_cover/'][...,].tolist()) # 1/21/22 Changes - new tags for tcc_prc, rm tcc_flg
+        seg_cover.append(f['/' + line     + '/land_segments/canopy/segment_cover/'][...,].tolist()) # 1/21/22 Changes - seg_cover replaces tcc
     
         # Uncertainty fields
         cloud_flg.append(f['/' + line   + land_seg_path + 'cloud_flag_atm/'][...,].tolist())
@@ -475,6 +492,8 @@ def extract_atl08(args):
     
     h_max_can   =np.array([h_max_can[l][k] for l in range(nLines) for k in range(len(h_max_can[l]))] )
     h_can       =np.array([h_can[l][k] for l in range(nLines) for k in range(len(h_can[l]))] )
+    h_can_unc   =np.array([h_can_unc[l][k] for l in range(nLines) for k in range(len(h_can_unc[l]))] ) # new as of 2022
+    h_can_quad  =np.array([h_can_quad[l][k] for l in range(nLines) for k in range(len(h_can_quad[l]))] )
     
     # 1/21/22: No more can_h_met_0 etc for 20m segments - will make separate RH % arrays later on
     if do_20m:
@@ -490,8 +509,11 @@ def extract_atl08(args):
     n_ca_ph     =np.array([n_ca_ph[l][k] for l in range(nLines) for k in range(len(n_ca_ph[l]))] )
     n_toc_ph    =np.array([n_toc_ph[l][k] for l in range(nLines) for k in range(len(n_toc_ph[l]))] )
     can_open    =np.array([can_open[l][k] for l in range(nLines) for k in range(len(can_open[l]))] )
+    can_rh_conf =np.array([can_rh_conf[l][k] for l in range(nLines) for k in range(len(can_rh_conf[l]))] )
+    seg_cover   =np.array([seg_cover[l][k] for l in range(nLines) for k in range(len(seg_cover[l]))] )
+    
     #tcc_flg     =np.array([tcc_flg[l][k] for l in range(nLines) for k in range(len(tcc_flg[l]))] )
-    tcc_prc     =np.array([tcc_prc[l][k] for l in range(nLines) for k in range(len(tcc_prc[l]))] )
+    #tcc_prc     =np.array([tcc_prc[l][k] for l in range(nLines) for k in range(len(tcc_prc[l]))] )
 
     cloud_flg   =np.array([cloud_flg[l][k] for l in range(nLines) for k in range(len(cloud_flg[l]))] )
     msw_flg     =np.array([msw_flg[l][k] for l in range(nLines) for k in range(len(msw_flg[l]))] )
@@ -567,7 +589,7 @@ def extract_atl08(args):
         print('Raster Y (' + str(args.resolution) + ' m) Resolution at ' + str(CenterLat) + ' degrees N = ' + str(pixelSpacingInDegreeY))
 
     # Create a handy ID label for each point - this will be repeated if do_20m is True
-    #fid = np.arange(1, len(h_max_can)+1, 1)
+    #fid = np.arange(1, len(h_max_can)+1, 1) # this will be useless in my case
 
     if TEST:
         print("\nSet up a dataframe dictionary...")
@@ -595,6 +617,10 @@ def extract_atl08(args):
     dict_rh_metrics = {
                     'h_max_can' :h_max_can,
                     'h_can'     :h_can,
+                    'h_can_quad':h_can_quad,
+                    'h_can_unc' :h_can_unc,                    
+                    
+                    
                     # RHs: 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95%
                     'rh10'      :can_h_met[:,0],
                     'rh15'      :can_h_met[:,1],
@@ -620,8 +646,10 @@ def extract_atl08(args):
                     'n_ca_ph'   :n_ca_ph,
                     'n_toc_ph'  :n_toc_ph,
                     'can_open'  :can_open,
+                    'can_rh_conf':can_rh_conf,
+                    'seg_cover'  :seg_cover,
                     #'tcc_flg'   :tcc_flg,
-                    'tcc_prc'   :tcc_prc,
+                    #'tcc_prc'   :tcc_prc,
 
                     'cloud_flg' :cloud_flg,
                     'msw_flg'   :msw_flg,
@@ -663,7 +691,7 @@ def extract_atl08(args):
         
         dict_other_fields['h_te_best_20m'] = h_te_best_20m            
     
-    # Erased large chunk of old code for building dicts
+    # Erased large chunk of old logic for building dicts
 
     print("\nBuilding pandas dataframe...")
 
@@ -682,7 +710,8 @@ def extract_atl08(args):
     # this way we can still use exisiting filters and avoid losing the 100m 
     # info associated with each 20m segment
     # The redundant info can be cleaned up in zonal stats outputs and/or can
-    # be taken care of if using an actual database
+    # be taken care of if using an actual database (can have a 100m segment 
+    # db table that can be linked with 20m table using id_100m)
     if do_20m:
         outDict = reconfigureArrays(outDict)
     
@@ -742,25 +771,38 @@ def extract_atl08(args):
     'Urban_built_up', 'Snow_and_ice',
     'Permanent_water_bodies', 'Open_sea']
     """
+    
     # Set flag names - meaning, convert the numerical code to the descriptor. Default False - the below are wrong anyways now
     if args.set_flag_names:
+        # 2/2/22: Paul translated the above lists to replace the old landcover fields, copy that here:
+        class_values = [ 0, 111, 113, 112, 114, 115, 116, 121, 123, 122, 124, 125, 126, 20, 30, 90, 100, 60, 40, 50, 70, 80, 200]
+        class_names = ['No data','Closed forest\nevergreen needle','Closed forest\ndeciduous needle','Closed forest\nevergreen_broad','Closed forest\ndeciduous broad','Closed forest\nmixed', 'Closed forest\nunknown','Open forest\nevergreen needle',
+                'Open forest deciduous needle','Open forest evergreen_broad','Open forest deciduous_broad','Open forest mixed', 'Open forest unknown', 'Shrubs','Herbaceous', 'Herbaceous\nwetleand','Moss/lichen', 'Bare/sparse','Cultivated/managed',
+                'Urban/built', 'Snow/ice','Permanent\nwater', 'Open sea']
+        out['seg_landcov'] = out['seg_landcov'].map(dict(zip(class_values, class_names)))
         
+        """
+        # old way (pre v5)
         out['seg_landcov'] = out['seg_landcov'].map({0: "water", 1: "evergreen needleleaf forest", 2: "evergreen broadleaf forest", \
                                                      3: "deciduous needleleaf forest", 4: "deciduous broadleaf forest", \
                                                      5: "mixed forest", 6: "closed shrublands", 7: "open shrublands", \
                                                      8: "woody savannas", 9: "savannas", 10: "grasslands", 11: "permanent wetlands", \
                                                      12: "croplands", 13: "urban-built", 14: "croplands-natural mosaic", \
                                                      15: "permanent snow-ice", 16: "barren"})
+        """
         out['seg_snow'] = out['seg_snow'].map({0: "ice free water", 1: "snow free land", 2: "snow", 3: "ice"})
         out['cloud_flg'] = out['cloud_flg'].map({0: "High conf. clear skies", 1: "Medium conf. clear skies", 2: "Low conf. clear skies", \
                                                  3: "Low conf. cloudy skies", 4: "Medium conf. cloudy skies", 5: "High conf. cloudy skies"})
         out['night_flg'] = out['night_flg'].map({0: "day", 1: "night"})
         #out['tcc_flg'] = out['tcc_flg'].map({0: "=<5%", 1: ">5%"})
                                          
-    # Bin tcc values - 2/2/22 added include_lowest = True so tcc of 0% gets mapped to 10 bin rather than NaN                                     
-    tcc_bins = [0,10,20,30,40,50,60,70,80,90,100]
-    out['tcc_bin'] = pd.cut(out['tcc_prc'], bins=tcc_bins, labels=tcc_bins[1:], include_lowest=True)
-    
+    # Bin tcc values - 2/2/22 added include_lowest = True so tcc of 0% gets mapped to 10 bin rather than NaN
+    # Per Paul this is no longer necessary                                  
+    #tcc_bins = [0,10,20,30,40,50,60,70,80,90,100]
+    #out['tcc_bin'] = pd.cut(out['tcc_prc'], bins=tcc_bins, labels=tcc_bins[1:], include_lowest=True)
+    # Add granule name to table 2/2/22
+    out['granule_name'] = granule_fname
+
     if args.filter_qual:
 
         print('Quality Filtering: \t\t[ON]')
@@ -770,7 +812,9 @@ def extract_atl08(args):
         # These filters are customized for boreal
         out = FilterUtils.prep_filter_atl08_qual(out)
         out = FilterUtils.filter_atl08_qual_v2(out, SUBSET_COLS=False, DO_PREP=False,
-                                                   subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh90','h_can','h_max_can','seg_landcov','night_flg','seg_water','sol_el','asr','ter_slp', 'ter_flg','y','m','d'], 
+                                                   subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh90','h_can','h_max_can','h_can_quad','h_can_unc',
+                                                                     'h_te_best','h_te_unc', 'granule_name','can_rh_conf', 'h_dif_ref',
+                                                                     'seg_landcov','seg_cover','night_flg','seg_water','sol_el','asr','ter_slp', 'ter_flg','year','month','day'], 
                                                    filt_cols=['h_can','h_dif_ref','month','msw_flg','beam_type','seg_snow','sig_topo'], 
                                                    thresh_h_can=100, thresh_h_dif=25, thresh_sig_topo=2.5, month_min=args.minmonth, month_max=args.maxmonth)
 
