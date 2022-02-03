@@ -207,7 +207,7 @@ def extract_atl08(args):
 
     TEST = args.TEST
     do_20m = args.do_20m
-    
+
     # File path to ICESat-2h5 file
     H5 = args.input
     
@@ -215,54 +215,57 @@ def extract_atl08(args):
     inDir = '/'.join(H5.split('/')[:-1])
     granule_fname = H5.split('/')[-1]
     Name = granule_fname.split('.')[0]
-
+    
+    # Set up output and logging directories
     if args.output == None:
         outbase = os.path.join(inDir, Name)
         logdir  = os.path.join(inDir, '_logs')
     else:
         outbase = os.path.join(args.output, Name)
         logdir  = os.path.join(args.output, '_logs')
-
-    # Log output if arg supplied        
-    if args.logging:
-        lname = '{}_100m'.format(Name)
-        if do_20m:
-            lname = lname.replace('_100m', '_20m')
-        sys.stdout = logOutput(logdir, lname, mode = "a")
-
-    # Start clock
-    start = time.time()
-    print("\nBegin: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
-    print("\nATL08 granule name: \t{}".format(Name))
-    print("Input dir: \t\t{}\n".format(inDir))
-    
-    if args.filter_geo:
-        print("Min lat: {}".format(args.minlat))
-        print("Max lat: {}".format(args.maxlat))
-        print("Min lon: {}".format(args.minlon))
-        print("Max lon: {}\n".format(args.maxlon)) 
-
-    if args.overwrite:
-        # Overwite is True (on)
-        pass
-    else:
-        if os.path.isfile(os.path.join(outbase + '.csv')):
-            # Overwite is False (off) and file exists
-            print("FILE EXISTS AND WE'RE NOT OVERWRITING")
-            os._exit(1)
-        else:
-            # Overwite is False (off) but file DOES NOT exist
-            pass
-
-    # 1/21/22: Probably unnecessary but keep it
+        
+    # Need this block now so we can get output .csv name and check for existence
     land_seg_path = '/land_segments/' # Now, everything point-specific (for 100m or 20m segments) is within this tag
     if do_20m:
         segment_length = 20
     else:
         segment_length = 100
     fn_tail = '_' + str(segment_length) + 'm.csv'
+    out_csv_fn = os.path.join(outbase + fn_tail)
+
+    # Check file existence before logging:
+    if args.overwrite:
+        # Overwite is True (on)
+        pass
+    else:
+        if os.path.isfile(out_csv_fn):
+            # Overwite is False (off) and file exists
+            print(" FILE EXISTS AND WE'RE NOT OVERWRITING")
+            os._exit(1)
+        else:
+            # Overwite is False (off) but file DOES NOT exist
+            pass
         
+    # Log output if arg supplied        
+    if args.logging:
+        lname = '{}_100m'.format(Name)
+        if do_20m:
+            lname = lname.replace('_100m', '_20m')
+        sys.stdout = logOutput(logdir, lname, mode = "a")
+        sys.stdout.flush()
+
+    # Start clock
+    start = time.time()
+    print("\nBegin: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
+    print("\nATL08 granule name: \t{}".format(Name))
+    print("Input dir: \t\t{}\n".format(inDir))
     print("\nSegment length: {}m".format(segment_length)) 
+    
+    if args.filter_geo:
+        print("\nMin lat: {}".format(args.minlat))
+        print("Max lat: {}".format(args.maxlat))
+        print("Min lon: {}".format(args.minlon))
+        print("Max lon: {}\n".format(args.maxlon))
     
     # open file
     f = h5py.File(H5,'r')
@@ -693,12 +696,23 @@ def extract_atl08(args):
     
     # Erased large chunk of old logic for building dicts
 
-    print("\nBuilding pandas dataframe...")
-
-    # 1/21/22: Already added any 20m entries to dataframes so removed if/else   
+  
 
     # First, get one big dictionary for all value types
     outDict = rec_merge1(dict_orb_gt_seg, rec_merge1(dict_rh_metrics, dict_other_fields))
+  
+    # This is redunant filtering, but for large datasets reconfiguring the arrays takes a while
+    # There are two filters that are usually the cause of returning empty datasets
+    # If there are no points that independently do not meet these criteria, there is no point in continuing
+    # TBD whether or not this will speed things up - it will
+    if 0 not in outDict['msw_flg'].tolist() or 1 not in outDict['seg_snow'].tolist():
+        print("Pre-filtering step determined there are no good points in dataset. Exiting")
+        #return None
+    
+    print("\nBuilding pandas dataframe...")
+
+    
+    # 1/21/22: Already added any 20m entries to dataframes so removed if/else
 
     # 1/24/22 - Added portion here to configure arrays if do_20m is True
     # If we are not adding 20m segments, all arrays in outDict will be of shape
@@ -800,6 +814,7 @@ def extract_atl08(args):
     # Per Paul this is no longer necessary                                  
     #tcc_bins = [0,10,20,30,40,50,60,70,80,90,100]
     #out['tcc_bin'] = pd.cut(out['tcc_prc'], bins=tcc_bins, labels=tcc_bins[1:], include_lowest=True)
+    
     # Add granule name to table 2/2/22
     out['granule_name'] = granule_fname
 
@@ -831,7 +846,15 @@ def extract_atl08(args):
                  ]
     else:
         print('Geographic Filtering: \t[OFF] (do downstream)')
-     
+
+    # After filtering, output dataframe may be empty. If so, exit program
+    if out.empty:
+        print('File is empty after filtering. Exiting')
+        return None
+        
+
+
+
     # GET UNIQUE ID FIELDS
     # 1/25/22: After filtering, get the uniqueID columns in DF using function
     # 2/2/22 : If not doing 20m segments, unique_id = 100m segment ID
@@ -854,13 +877,9 @@ def extract_atl08(args):
     colsOrdered = getOrderedColumns(out)
     out = out[colsOrdered]
 
-    if out.empty:
-        print('File is empty.')
-    else:
-        # Write out to a csv
-        out_csv_fn = os.path.join(outbase + fn_tail)
-        print('\nWriting {} rows to CSV: {}'.format(len(out), out_csv_fn))
-        out.to_csv(out_csv_fn,index=False, encoding="utf-8-sig")
+    # At this point we know out is not empty - Write out to csv
+    print('\nWriting {} rows to CSV: {}'.format(len(out), out_csv_fn))
+    out.to_csv(out_csv_fn,index=False, encoding="utf-8-sig")
         
     print("\nEnd: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))        
     calculateElapsedTime(start, time.time())

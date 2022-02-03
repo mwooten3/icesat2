@@ -56,15 +56,19 @@ def main():
     nFiles = len(inFiles)
 
     print("Processing {} files...".format(nFiles))
+    cnt = 0
 
     for bname in inFiles:
+        cnt+=1
+        
+        print(" {} of {}".format(cnt, nFiles))
 
         date = bname.split('_')[1][0:8]
         subdir = '{}.{}.{}'.format(date[0:4], date[4:6], date[6:8])
         
         inh5 = os.path.join(h5dir, subdir, '{}.h5'.format(bname))
         
-        cmd = 'python extract_filter_atl08_v005.py -i {} -o {} --do_20m --log'.format(inh5, outdir)
+        cmd = 'python extract_filter_atl08_v005.py -i {} -o {} --do_20m --no-overwrite'.format(inh5, outdir)
         os.system(cmd)
 
     
