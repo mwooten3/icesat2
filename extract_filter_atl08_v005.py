@@ -26,21 +26,18 @@
     
 # 1/25/22
 # - Adding code to get uniqueIDs (for 100m and 20m)
-# - Adding code to get min/max of unfiltered data and return (outCSV, extent)
-    # so it can be written to .csv in wrapper code
 # - Adding logging option for runs
     
-#2/2/22:
+# 2/2/22:
 # - Removed fid field because it was pointless with our uID field
 # - Changed field names to be a little more descriptive - very few changes
-# - Added include_lowest=True to tcc_bin mapping portion so 0% tcc gets binned to 10 not NaN
+# - Removed tcc_bin and replaced tcc_prc and other old fields that are no longer in v005
 # - Cleaned up old code from previous version (can reference extract_filter_atl08.py if need be)
 
 import h5py
-#from osgeo import gdal
 import numpy as np
 import pandas as pd
-#import subprocess
+
 import os, sys
 import math
 
@@ -102,6 +99,7 @@ def getOrderedColumns(df):
     return colsOrdered    
     
 # Added 1/25/22
+# Get the 100m segment's unique ID
 def get100mSegId(lon, lat, date):
     
     import math
@@ -114,7 +112,7 @@ def get100mSegId(lon, lat, date):
     # We want to always get 6 digits after decimal point to be safe (prob not necessary)
     # Depending on number of digits in whole part, decimal part may be padded with 0s
     lonSplit = math.modf(lon) # split into whole and decimal parts
-    lonWhole = str(lonSplit[1]).strip('-').split('.')[0] # probably a better way to do this but oh well
+    lonWhole = str(lonSplit[1]).strip('-').split('.')[0]
     lonDec = str(lonSplit[0]).split('.')[1][0:6]
     
     latSplit = math.modf(lat)
@@ -127,7 +125,7 @@ def get100mSegId(lon, lat, date):
         
     if lat < 0: latDir = 'S'
     elif lat > 0: latDir = 'N'
-    else: latDir = '0' # if (should never happen) lon = 0, 0.0000000 -> 00000000
+    else: latDir = '0' # if (should never happen) lat = 0, 0.0000000 -> 00000000
     
     idLon = '{}{}{}'.format(lonWhole, lonDir, lonDec)   
     idLat = '{}{}{}'.format(latWhole, latDir, latDec)
@@ -147,6 +145,7 @@ def getUniqueId(id100, id20):
     
     return '{}-S{}'.format(id100, id20)
 
+# Need to update for Python3
 def logOutput(logdir, bname, mode):
 
     os.system('mkdir -p {}'.format(logdir))
@@ -155,6 +154,8 @@ def logOutput(logdir, bname, mode):
 
     return sys.stdout
 
+# Don't love this approach but is probably the best way to deal for now with 
+# the layers of 20m/100m segment stuff without totally rewriting the script
 def reconfigureArrays(inDict):
     
     outDict = {}
@@ -185,6 +186,7 @@ def rec_merge1(d1, d2):
             d2[k] = rec_merge1(v, d2[k])
     d3 = d1.copy()
     d3.update(d2)
+
     return d3
 
 def extract_atl08(args):
@@ -240,7 +242,7 @@ def extract_atl08(args):
     else:
         if os.path.isfile(out_csv_fn):
             # Overwite is False (off) and file exists
-            print(" FILE EXISTS AND WE'RE NOT OVERWRITING")
+            print(" FILE EXISTS AND WE'RE NOT OVERWRITING\n")
             os._exit(1)
         else:
             # Overwite is False (off) but file DOES NOT exist
@@ -704,10 +706,9 @@ def extract_atl08(args):
     # This is redunant filtering, but for large datasets reconfiguring the arrays takes a while
     # There are two filters that are usually the cause of returning empty datasets
     # If there are no points that independently do not meet these criteria, there is no point in continuing
-    # TBD whether or not this will speed things up - it will
     if 0 not in outDict['msw_flg'].tolist() or 1 not in outDict['seg_snow'].tolist():
-        print("Pre-filtering step determined there are no good points in dataset. Exiting")
-        #return None
+        print("\nPre-filtering step determined there are no good points in dataset. Exiting")
+        return None
     
     print("\nBuilding pandas dataframe...")
 
@@ -725,7 +726,7 @@ def extract_atl08(args):
     # info associated with each 20m segment
     # The redundant info can be cleaned up in zonal stats outputs and/or can
     # be taken care of if using an actual database (can have a 100m segment 
-    # db table that can be linked with 20m table using id_100m)
+    # db table that can be linked with 20m table using id_100m/uId)
     if do_20m:
         outDict = reconfigureArrays(outDict)
     
@@ -786,7 +787,7 @@ def extract_atl08(args):
     'Permanent_water_bodies', 'Open_sea']
     """
     
-    # Set flag names - meaning, convert the numerical code to the descriptor. Default False - the below are wrong anyways now
+    # Set flag names - meaning, convert the numerical code to the descriptor. Default False
     if args.set_flag_names:
         # 2/2/22: Paul translated the above lists to replace the old landcover fields, copy that here:
         class_values = [ 0, 111, 113, 112, 114, 115, 116, 121, 123, 122, 124, 125, 126, 20, 30, 90, 100, 60, 40, 50, 70, 80, 200]
@@ -796,7 +797,7 @@ def extract_atl08(args):
         out['seg_landcov'] = out['seg_landcov'].map(dict(zip(class_values, class_names)))
         
         """
-        # old way (pre v5)
+        # old key codes (pre v5)
         out['seg_landcov'] = out['seg_landcov'].map({0: "water", 1: "evergreen needleleaf forest", 2: "evergreen broadleaf forest", \
                                                      3: "deciduous needleleaf forest", 4: "deciduous broadleaf forest", \
                                                      5: "mixed forest", 6: "closed shrublands", 7: "open shrublands", \
@@ -849,11 +850,9 @@ def extract_atl08(args):
 
     # After filtering, output dataframe may be empty. If so, exit program
     if out.empty:
-        print('File is empty after filtering. Exiting')
+        print('\nFile is empty after filtering. Exiting')
         return None
         
-
-
 
     # GET UNIQUE ID FIELDS
     # 1/25/22: After filtering, get the uniqueID columns in DF using function
