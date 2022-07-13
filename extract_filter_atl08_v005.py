@@ -5,39 +5,62 @@
     Version: 1.0
     THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.'''
 
-# 1/20: Created from extract_filter_atl08.py and edited to work with v005 data
-# CHANGES from above script:
-# - Changed default min/max month from 6-9 to 1-12
-# - Changed default min/max latitude from 45-75 to 30-90
+"""
+# This script was copied from extract_filter_atl08.py, edited to work with 
+  # v005 ATL08 data and enable the option to extract 20m 
+  # segment information in addition to 100m info
+  
+  # See *do_20m and *v005 for changes made from the original extract script
+    
+# Example call with extracting 20m segment info and logging:
+  # python extract_filter_atl08_v005.py -i /css/icesat-2/ATLAS/ATL08.005/
+    2018.12.26/ATL08_20181226222354_13640102_005_01.h5 -o <outDir> --do_20m --log
+    
+  # Difference between --do_20m and default (100m) is the former will have a 
+    # few extra columns and 5x as many rows as 100m run of same input
 
-# - Commented/removed references to tcc_flg everywhere
-# - Updated flag to get tcc_prc (and removed references to tcc_prc under if do_30)
+# Log changes:
+# 1/20/22 - *v005:
+    # Created from extract_filter_atl08.py and edited to work with v005 data
+    # Changed default min/max month from 6-9 to 1-12
+    # Changed default min/max latitude from 45-75 to 30-90
+
+    # Commented/removed references to tcc_flg everywhere
+    # Updated flag to get tcc_prc (and removed references to tcc_prc)
     
-# - Set SUBSET_COLS = False in call to filter
+    # Set SUBSET_COLS = False in call to filter
     
-# - Changing if do_30 to do_20 and making several other changes:
-    # See 1/21/22 for areas that were changed
+# 1/21/22 - *do_20m: 
+    # Changing if do_30 to do_20 and making several other edits 
+      # to work with 20m segments
+
+# 1/24/22 - *do_20m:
+    # Changed the way if do_20m works with code...
+    # Instead of replacing 100m stuff, 20m info gets added in addition to
+      # the 100m info. This will multiply the number of output rows by 5,
+      # but is the best solution since not much info for 20m segments
+      # is provided. Unnecessary/redundant info can be pared down later
     
-# 1/24/22
-# - Changed the way if do_20m works with code. Instead of replacing 100m stuff,
-    # it just gets added to the 100m stuff. This will multiply the number of
-    # output rows by 5, but is the best solution since not much info for 20m
-    # segments is provided. Unnecessary info can be pared down later
+# 1/25/22 - *do_20m:
+    # Adding code to get uniqueIDs (for 100m and 20m)
+    # Adding code to get min/max of unfiltered data and return (outCSV, extent)
+      # so it can be written to .csv in wrapper code
+    # Adding logging option for runs
     
-# 1/25/22
-# - Adding code to get uniqueIDs (for 100m and 20m)
-# - Adding logging option for runs
-    
-# 2/2/22:
-# - Removed fid field because it was pointless with our uID field
-# - Changed field names to be a little more descriptive - very few changes
-# - Removed tcc_bin and replaced tcc_prc and other old fields that are no longer in v005
-# - Cleaned up old code from previous version (can reference extract_filter_atl08.py if need be)
+# 2/2/22 - *v005/*do_20m::
+    # Removed fid field because it was pointless with our uID field
+    # Changed field names to be a little more descriptive - very few changes
+    # Added include_lowest=True to tcc_bin mapping portion so 0% tcc gets 
+      # binned to 10 not NaN --> NVM, no more tcc binning
+    # Cleaned up old code from previous version (can reference 
+      # extract_filter_atl08.py if need be)
+"""
 
 import h5py
+#from osgeo import gdal
 import numpy as np
 import pandas as pd
-
+#import subprocess
 import os, sys
 import math
 
@@ -98,8 +121,7 @@ def getOrderedColumns(df):
     
     return colsOrdered    
     
-# Added 1/25/22
-# Get the 100m segment's unique ID
+#*do_20m - (1/25/22) - revise as necessary
 def get100mSegId(lon, lat, date):
     
     import math
@@ -112,7 +134,7 @@ def get100mSegId(lon, lat, date):
     # We want to always get 6 digits after decimal point to be safe (prob not necessary)
     # Depending on number of digits in whole part, decimal part may be padded with 0s
     lonSplit = math.modf(lon) # split into whole and decimal parts
-    lonWhole = str(lonSplit[1]).strip('-').split('.')[0]
+    lonWhole = str(lonSplit[1]).strip('-').split('.')[0] # probably a better way to do this but oh well
     lonDec = str(lonSplit[0]).split('.')[1][0:6]
     
     latSplit = math.modf(lat)
@@ -125,7 +147,7 @@ def get100mSegId(lon, lat, date):
         
     if lat < 0: latDir = 'S'
     elif lat > 0: latDir = 'N'
-    else: latDir = '0' # if (should never happen) lat = 0, 0.0000000 -> 00000000
+    else: latDir = '0' # if (should never happen) lon = 0, 0.0000000 -> 00000000
     
     idLon = '{}{}{}'.format(lonWhole, lonDir, lonDec)   
     idLat = '{}{}{}'.format(latWhole, latDir, latDec)
@@ -140,23 +162,15 @@ def get100mSegId(lon, lat, date):
     
     return ID
 
-# This will only be called when do_20m is True, otherwise uniqueId = 100m segid
-def getUniqueId(id100, id20):
-    
-    return '{}-S{}'.format(id100, id20)
-
-# Need to update for Python3
 def logOutput(logdir, bname, mode):
 
     os.system('mkdir -p {}'.format(logdir))
-    logfile = os.path.join(logdir, '{}__extractLog.txt'.format(bname))
+    logfile = os.path.join(logdir, '{}__extract-atl08_Log.txt'.format(bname))
     sys.stdout = open(logfile, mode)
 
     return sys.stdout
 
-# Don't love this approach but is probably the best way to deal for now with 
-# the layers of 20m/100m segment stuff without totally rewriting the script
-def reconfigureArrays(inDict):
+def reFormatArrays(inDict):
     
     outDict = {}
     repeat = 5 # 5 20m segments in 100m segment
@@ -186,7 +200,6 @@ def rec_merge1(d1, d2):
             d2[k] = rec_merge1(v, d2[k])
     d3 = d1.copy()
     d3.update(d2)
-
     return d3
 
 def extract_atl08(args):
@@ -248,26 +261,23 @@ def extract_atl08(args):
             # Overwite is False (off) but file DOES NOT exist
             pass
         
-    # Log output if arg supplied        
+    # Log output if arg supplied    
     if args.logging:
-        lname = '{}_100m'.format(Name)
-        if do_20m:
-            lname = lname.replace('_100m', '_20m')
-        sys.stdout = logOutput(logdir, lname, mode = "a")
+        sys.stdout = logOutput(logdir, Name, mode = "a")
         sys.stdout.flush()
 
     # Start clock
     start = time.time()
-    print("\nBegin: {}\n".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
+    print("\nBegin: {}".format(time.strftime("%m-%d-%y %I:%M:%S %p")))
     print("\nATL08 granule name: \t{}".format(Name))
-    print("Input dir: \t\t{}\n".format(inDir))
+    print("Input dir: \t\t{}".format(inDir))
     print("\nSegment length: {}m".format(segment_length)) 
     
     if args.filter_geo:
         print("\nMin lat: {}".format(args.minlat))
         print("Max lat: {}".format(args.maxlat))
         print("Min lon: {}".format(args.minlon))
-        print("Max lon: {}\n".format(args.maxlon))
+        print("Max lon: {}\n\n".format(args.maxlon))
     
     # open file
     f = h5py.File(H5,'r')
@@ -298,11 +308,11 @@ def extract_atl08(args):
     can_open = []    # stdv of all photons classified as canopy within segment
     can_rh_conf = [] # Canopy relative height confidence flag based on percentage of ground and canopy photons within a segment: 0 (<5% canopy), 1 (>5% canopy, <5% ground), 2 (>5% canopy, >5% ground)
    
-    # 1/21/22 Changes - remove tcc_flg and tcc_prc ref - use seg_cover
+    #*v005 - remove tcc_flg and tcc_prc ref - use seg_cover
     #tcc_flg = [] # Flag indicating that more than 50% of the Landsat Continuous Cover product have values > 100 for the L-Km segment.  Canopy is assumed present along the L-km segment if landsat_flag is 1.
     seg_cover = [] # Average percentage value of the valid (value <= 100) Copernicus fractional cover product for each 100 m segment
 
-    # 1/21/22: additional fields for 20m segments:
+    #*do_20m - additional fields for 20m segments:
     if do_20m:
         latitude_20m  = []
         longitude_20m = []
@@ -405,9 +415,11 @@ def extract_atl08(args):
         segid_end.append(f['/' + line   + land_seg_path + 'segment_id_end/'][...,].tolist())
         
         # Canopy fields
-        # 1/21/22: None of these fields exist for 20m segments apparently (as of now)
-        # Except RH98 (h_canopy_20m), lat/lon (_20m), h_te_best_fit_20m
 
+        #*do_20m - build 20m lists from .h5 data
+          # None of these fields exist for 20m segments as of now, except
+          # RH98 (h_canopy_20m), lat/lon (_20m), h_te_best_fit_20m
+          
         if do_20m:
             latitude_20m.append(f['/' + line    + land_seg_path + 'latitude_20m/'][...,].tolist())
             longitude_20m.append(f['/' + line   + land_seg_path + 'longitude_20m/'][...,].tolist())
@@ -418,13 +430,9 @@ def extract_atl08(args):
             segList = [1, 2, 3, 4, 5]
             seg20_id.append([segList for i in range(n_20m)]) # list created in append will be same size/shape as other 20m lists 
             
-            #seg20_id = np.copy(latitude_20m)
-            #for i in range(len(seg20_id[0])): seg20_id[0][i] = np.array([1, 2, 3, 4, 5])
-            #seg20_id[0] = np.array(['1', '2', '3', '4', '5']) # No clue why this works TBH
             
-            # Erased old chunk here (can_met array stuff and testing block)
-            
-        # 1/21/22 *Instead of if/else, we want 20m-specific info to be done in *addition* to 100m, not instead of 
+        #*do_20m - Instead of if/else, we want 20m-specific info to be 
+          # extracted in addition to 100m, not instead of 
         can_h_met.append(f['/' + line   + '/land_segments/canopy/canopy_h_metrics/'][...,].tolist())
         
         h_max_can.append(f['/' + line   + '/land_segments/canopy/h_max_canopy/'][...,].tolist())
@@ -437,7 +445,8 @@ def extract_atl08(args):
         can_open.append(f['/' + line    + '/land_segments/canopy/canopy_openness/'][...,].tolist())
         can_rh_conf.append(f['/' + line + '/land_segments/canopy/canopy_rh_conf/'][...,].tolist())
         
-        seg_cover.append(f['/' + line     + '/land_segments/canopy/segment_cover/'][...,].tolist()) # 1/21/22 Changes - seg_cover replaces tcc
+        #*v005 - seg_cover replaces tcc
+        seg_cover.append(f['/' + line     + '/land_segments/canopy/segment_cover/'][...,].tolist())
     
         # Uncertainty fields
         cloud_flg.append(f['/' + line   + land_seg_path + 'cloud_flag_atm/'][...,].tolist())
@@ -454,8 +463,7 @@ def extract_atl08(args):
         sig_topo.append(f['/' + line    + land_seg_path + 'sigma_topo/'][...,].tolist())
 
         # Terrain fields
-        # 1/21/22: Same thing as above. Only one terrain field is 20m specific, so do it in addition to, not instead of
-        # Erased some stuff/changed if-else block to only if
+        #*do_20m - Grab the only terrain field for 20m segment
         if do_20m:
             h_te_best_20m.append(f['/' + line   + '/land_segments/terrain/h_te_best_fit_20m'][...,].tolist())
 
@@ -476,7 +484,7 @@ def extract_atl08(args):
         seg_wmask.append(f['/' + line   + land_seg_path + 'segment_watermask/'][...,].tolist())
         lyr_flg.append(f['/' + line     + land_seg_path + 'layer_flag/'][...,].tolist())
     
-    # MW 3/31/21: Originally a length of 6 was hardcoded into the below calculations because the
+    # MW 3/31/20: Originally a length of 6 was hardcoded into the below calculations because the
     #          assumption was made that 6 lines/lasers worth of data was stored in the arrays. With
     #	       the above changes made to the beginning of the 'for line in lines' loop on 3/31, this
     #          assumption is no longer always true. Adding nLines var to replace range(6) below
@@ -500,14 +508,15 @@ def extract_atl08(args):
     h_can_unc   =np.array([h_can_unc[l][k] for l in range(nLines) for k in range(len(h_can_unc[l]))] ) # new as of 2022
     h_can_quad  =np.array([h_can_quad[l][k] for l in range(nLines) for k in range(len(h_can_quad[l]))] )
     
-    # 1/21/22: No more can_h_met_0 etc for 20m segments - will make separate RH % arrays later on
+    #*do_20m: No more can_h_met_0 etc for 20m segments - 
+      # will make separate RH % arrays later on 
+      # erased can_met array stuff, changed if-else block to only if
     if do_20m:
         latitude_20m  = np.array([latitude_20m[l][k] for l in range(nLines) for k in range(len(latitude_20m[l]))])
         longitude_20m = np.array([longitude_20m[l][k] for l in range(nLines) for k in range(len(longitude_20m[l]))])
         h_can_20m     = np.array([h_can_20m[l][k] for l in range(nLines) for k in range(len(h_can_20m[l]))])
         h_te_best_20m = np.array([h_te_best_20m[l][k] for l in range(nLines) for k in range(len(h_te_best_20m[l]))])
         seg20_id      = np.array([seg20_id[l][k] for l in range(nLines) for k in range(len(seg20_id[l]))])        
-        # erased can_met array stuff, changed if-else block to only if (not instead of 20m, but in addition to)
 
     can_h_met = np.array([can_h_met[l][k] for l in range(nLines) for k in range(len(can_h_met[l]))])
         
@@ -593,15 +602,16 @@ def extract_atl08(args):
         print('Raster X (' + str(args.resolution) + ' m) Resolution at ' + str(CenterLat) + ' degrees N = ' + str(pixelSpacingInDegreeX))
         print('Raster Y (' + str(args.resolution) + ' m) Resolution at ' + str(CenterLat) + ' degrees N = ' + str(pixelSpacingInDegreeY))
 
-    # Create a handy ID label for each point - this will be repeated if do_20m is True
-    #fid = np.arange(1, len(h_max_can)+1, 1) # this will be useless in my case
+    #*do_20m - Useless now with 100m/20m unique ID fields
+    # Create a handy ID label for each point
+    #fid = np.arange(1, len(h_max_can)+1, 1)
+
 
     if TEST:
         print("\nSet up a dataframe dictionary...")
-
-    #dict_pandas_df = {}
     
-    # 1/21/22: Instead of having separate 100m/20m dicts, add to dictionaries if do_20m is True    
+    #*do_20m - Instead of having separate 100m/20m dicts, add to 
+      # dictionaries if do_20m is True    
     dict_orb_gt_seg = {
                     #'fid_100m'  :fid,
                     'lon'       :longitude,
@@ -686,7 +696,7 @@ def extract_atl08(args):
                     'lyr_flg'   :lyr_flg
     }
     
-    # 1/21/22: Add 20m segment arrays to dict now
+    #*do_20m - Now add 20m segment arrays to dict
     if do_20m:
         dict_orb_gt_seg['lon_20m'] = longitude_20m
         dict_orb_gt_seg['lat_20m'] = latitude_20m
@@ -706,29 +716,32 @@ def extract_atl08(args):
     # This is redunant filtering, but for large datasets reconfiguring the arrays takes a while
     # There are two filters that are usually the cause of returning empty datasets
     # If there are no points that independently do not meet these criteria, there is no point in continuing
+    # TBD whether or not this will speed things up - it will
     if 0 not in outDict['msw_flg'].tolist() or 1 not in outDict['seg_snow'].tolist():
         print("\nPre-filtering step determined there are no good points in dataset. Exiting")
         return None
     
     print("\nBuilding pandas dataframe...")
 
-    
-    # 1/21/22: Already added any 20m entries to dataframes so removed if/else
 
-    # 1/24/22 - Added portion here to configure arrays if do_20m is True
-    # If we are not adding 20m segments, all arrays in outDict will be of shape
+    #*do_20m new
+    # Configure arrays if do_20m is True: 
+
+    # If only extracting 100m segments, all arrays in outDict will be of shape
     # (X,) [aka ndims = 1], so no edits need to be made before DF creation
     
-    # But if we are doing 20m segments, we need to reconfigure the 1D arrays to
+    # But if extracting 20m segments, 1D arrays need to be reformatted to
     # repeat the 100m info for each 20m segment. This will multiply the size of 
     # all 1D (aka 100m segment) arrays by 5 and therefore the output .csv, but 
-    # this way we can still use exisiting filters and avoid losing the 100m 
+    # this way we can still use existing filters and avoid losing the 100m 
     # info associated with each 20m segment
     # The redundant info can be cleaned up in zonal stats outputs and/or can
-    # be taken care of if using an actual database (can have a 100m segment 
-    # db table that can be linked with 20m table using id_100m/uId)
+    # be taken care of if using an actual database, with a 100m segment 
+    # db table that can be joined with 20m table using id_100m (combine with 
+    # 20m seg id id_20m for unique 20m IDs)
+    
     if do_20m:
-        outDict = reconfigureArrays(outDict)
+        outDict = reFormatArrays(outDict)
     
     # Create DF from dictionary
     out = pd.DataFrame(outDict)
@@ -738,22 +751,22 @@ def extract_atl08(args):
    
     print('# of ATL08 obs: \t\t{}'.format(len(out.lat[out.lat.notnull()])))
     print('# of ATL08 obs (can pho.>=0): \t{}'.format(len(out.n_ca_ph[
-                                                                    (out.h_can.notnull() ) & 
-                                                                    (out.n_ca_ph >= 0) 
-                                                                ])))
+                                                      (out.h_can.notnull() ) & 
+                                                      (out.n_ca_ph >= 0) 
+                                                                        ])))
     print('# of ATL08 obs (toc pho.>=0): \t{}'.format(len(out.n_toc_ph[
-                                                                    (out.h_can.notnull() ) & 
-                                                                    (out.n_toc_ph >= 0) 
-                                                                ])))
+                                                      (out.h_can.notnull() ) & 
+                                                      (out.n_toc_ph >= 0) 
+                                                                        ])))
     print('# of ATL08 obs (h_can>=0): \t{}'.format(len(out.h_can[
-                                                                (out.h_can.notnull() ) & 
-                                                                (out.h_can >= 0) 
-                                                               ])))
+                                                      (out.h_can.notnull() ) & 
+                                                      (out.h_can >= 0) 
+                                                                       ])))
     print('# of ATL08 obs (h_can<0): \t{}'.format(len(out.h_can[
-                                                                (out.h_can.notnull() ) & 
-                                                                (out.h_can < 0) 
-
-                                                               ])))
+                                                      (out.h_can.notnull() ) & 
+                                                                (out.h_can < 0)
+                                                                        ])))
+            
     # if set_nodata_nan is True (default False) set NoData to nan
     # if False, set it to the output NoData value (val_invalid)
     if args.set_nodata_nan:
@@ -763,7 +776,7 @@ def extract_atl08(args):
     print("Setting out pandas df nodata values: \t{}".format(val_nodata_out))
     out = out.replace(np.nan, val_nodata_out)
     
-    # 1/22: NEW with v005 - seg_landcover changed to Copernicus
+    #*v005 - seg_landcover changed to Copernicus
     # set_flag_names is False but if we want it to be True, need to update
     # seg_landcover (and others?) using the following:
     """
@@ -787,17 +800,27 @@ def extract_atl08(args):
     'Permanent_water_bodies', 'Open_sea']
     """
     
-    # Set flag names - meaning, convert the numerical code to the descriptor. Default False
+    # Set flag names - meaning, convert the numerical code to the descriptor. Default False - the below are wrong anyways now
     if args.set_flag_names:
-        # 2/2/22: Paul translated the above lists to replace the old landcover fields, copy that here:
-        class_values = [ 0, 111, 113, 112, 114, 115, 116, 121, 123, 122, 124, 125, 126, 20, 30, 90, 100, 60, 40, 50, 70, 80, 200]
-        class_names = ['No data','Closed forest\nevergreen needle','Closed forest\ndeciduous needle','Closed forest\nevergreen_broad','Closed forest\ndeciduous broad','Closed forest\nmixed', 'Closed forest\nunknown','Open forest\nevergreen needle',
-                'Open forest deciduous needle','Open forest evergreen_broad','Open forest deciduous_broad','Open forest mixed', 'Open forest unknown', 'Shrubs','Herbaceous', 'Herbaceous\nwetleand','Moss/lichen', 'Bare/sparse','Cultivated/managed',
+        #*v005 - Paul translated the above lists to replace the old landcover 
+          # fields, copy here:
+        class_values = [ 0, 111, 113, 112, 114, 115, 116, 121, 123, 122, 124, 
+                        125, 126, 20, 30, 90, 100, 60, 40, 50, 70, 80, 200]
+        class_names = ['No data','Closed forest\nevergreen needle',
+                       'Closed forest\ndeciduous needle',
+                       'Closed forest\nevergreen_broad',
+                       'Closed forest\ndeciduous broad','Closed forest\nmixed', 
+                       'Closed forest\nunknown','Open forest\nevergreen needle',
+                'Open forest deciduous needle','Open forest evergreen_broad',
+                'Open forest deciduous_broad','Open forest mixed', 
+                'Open forest unknown', 'Shrubs','Herbaceous', 
+                'Herbaceous\nwetleand','Moss/lichen', 'Bare/sparse','Cultivated/managed',
                 'Urban/built', 'Snow/ice','Permanent\nwater', 'Open sea']
-        out['seg_landcov'] = out['seg_landcov'].map(dict(zip(class_values, class_names)))
+        out['seg_landcov'] = out['seg_landcov'].map(dict(zip(class_values, 
+                                                                 class_names)))
         
         """
-        # old key codes (pre v5)
+        # old method (pre v005)
         out['seg_landcov'] = out['seg_landcov'].map({0: "water", 1: "evergreen needleleaf forest", 2: "evergreen broadleaf forest", \
                                                      3: "deciduous needleleaf forest", 4: "deciduous broadleaf forest", \
                                                      5: "mixed forest", 6: "closed shrublands", 7: "open shrublands", \
@@ -809,10 +832,11 @@ def extract_atl08(args):
         out['cloud_flg'] = out['cloud_flg'].map({0: "High conf. clear skies", 1: "Medium conf. clear skies", 2: "Low conf. clear skies", \
                                                  3: "Low conf. cloudy skies", 4: "Medium conf. cloudy skies", 5: "High conf. cloudy skies"})
         out['night_flg'] = out['night_flg'].map({0: "day", 1: "night"})
-        #out['tcc_flg'] = out['tcc_flg'].map({0: "=<5%", 1: ">5%"})
+        #out['tcc_flg'] = out['tcc_flg'].map({0: "=<5%", 1: ">5%"}) #*v005
                                          
-    # Bin tcc values - 2/2/22 added include_lowest = True so tcc of 0% gets mapped to 10 bin rather than NaN
-    # Per Paul this is no longer necessary                                  
+    #*v005: Bin tcc values - added include_lowest = True so tcc of 0% 
+            #gets mapped to 10 bin rather than NaN   
+    # nvm lol no longer needed                              
     #tcc_bins = [0,10,20,30,40,50,60,70,80,90,100]
     #out['tcc_bin'] = pd.cut(out['tcc_prc'], bins=tcc_bins, labels=tcc_bins[1:], include_lowest=True)
     
@@ -828,12 +852,14 @@ def extract_atl08(args):
         # These filters are customized for boreal
         out = FilterUtils.prep_filter_atl08_qual(out)
         out = FilterUtils.filter_atl08_qual_v2(out, SUBSET_COLS=False, DO_PREP=False,
-                                                   subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh90','h_can','h_max_can','h_can_quad','h_can_unc',
-                                                                     'h_te_best','h_te_unc', 'granule_name','can_rh_conf', 'h_dif_ref',
-                                                                     'seg_landcov','seg_cover','night_flg','seg_water','sol_el','asr','ter_slp', 'ter_flg','year','month','day'], 
-                                                   filt_cols=['h_can','h_dif_ref','month','msw_flg','beam_type','seg_snow','sig_topo'], 
-                                                   thresh_h_can=100, thresh_h_dif=25, thresh_sig_topo=2.5, month_min=args.minmonth, month_max=args.maxmonth)
-
+        subset_cols_list=['rh25','rh50','rh60','rh70','rh75','rh80','rh90',
+                          'h_can','h_max_can','h_can_quad','h_can_unc', 'h_te_best',
+                          'h_te_unc', 'granule_name','can_rh_conf', 'h_dif_ref',
+                          'seg_landcov','seg_cover','night_flg','seg_water',
+                          'sol_el','asr','ter_slp', 'ter_flg','year','month','day'], 
+        filt_cols=['h_can','h_dif_ref','month','msw_flg','beam_type','seg_snow','sig_topo'], 
+                        thresh_h_can=100, thresh_h_dif=25, thresh_sig_topo=2.5, 
+                            month_min=args.minmonth, month_max=args.maxmonth)
     else:
         print('Quality Filtering: \t[OFF] (do downstream)')
 
@@ -843,8 +869,7 @@ def extract_atl08(args):
         out = out[ (out['lon']     >= args.minlon) & 
                    (out['lon']     <= args.maxlon) & 
                    (out['lat']     >= args.minlat) & 
-                   (out['lat']     <= args.maxlat)
-                 ]
+                   (out['lat']     <= args.maxlat)]
     else:
         print('Geographic Filtering: \t[OFF] (do downstream)')
 
@@ -852,31 +877,36 @@ def extract_atl08(args):
     if out.empty:
         print('\nFile is empty after filtering. Exiting')
         return None
-        
 
-    # GET UNIQUE ID FIELDS
-    # 1/25/22: After filtering, get the uniqueID columns in DF using function
-    # 2/2/22 : If not doing 20m segments, unique_id = 100m segment ID
+    #*do_20m - GET UNIQUE ID FIELDS
+    # If not doing 20m segments, unique_id = 100m segment ID
     # If doing 20m segments, unique_id = 100m segment ID + 20m segment ID
-    # So 100m.csv will have just unique ID and 100m segment ID (which = unique ID)
+    # So 100m.csv will have just unique ID and 100m segment ID 
+      # (which = unique ID)
     # 20m.csv will have unique ID, 100m seg ID, 20m seg ID
-    out['id_100m'] = out.apply(lambda row: get100mSegId(row['lon'], row['lat'], row['dt']), axis=1)
-
+      # (id_20m already exists as column if do_20m)
+  
+    # Start by getting 100m segment ID
+    out['id_100m'] = list(map(lambda ln, lt, dt: get100mSegId(ln, lt, dt), \
+                                            out['lon'], out['lat'], out['dt']))
+     
     # If doing 20m segments, then unique ID is combo of id_100m and id_20m
     if do_20m: 
-        out['id_unique'] = out.apply(lambda row: getUniqueId(row['id_100m'], row['id_20m']), axis=1)
-    # Otherwise, then unique ID is just 100m id (yes this will add a duplicate
-    # column but it will allow us to have consisent unique ID column name)
+        out['id_unique'] = list(map(lambda i1, i2: \
+                        '{}-{}'.format(i1, i2), out['id_100m'], out['id_20m']))
+
+    # Otherwise, unique ID is just 100m id (yes this will add a duplicate
+    # column but it will enable a consisent unique ID column name. 
+    # un-likely to process 100m with this code anyways so w/e)
     else:
         out['id_unique'] = out['id_100m']
 
-
     # Lastly, try and reorder the columns before writing to .csv. 
-    # This part will have to be partially hardcoded - see function
+    # This part is partially hardcoded according to expected column names
     colsOrdered = getOrderedColumns(out)
     out = out[colsOrdered]
 
-    # At this point we know out is not empty - Write out to csv
+    # At this point we know out DF is not empty - Write out to csv
     print('\nWriting {} rows to CSV: {}'.format(len(out), out_csv_fn))
     out.to_csv(out_csv_fn,index=False, encoding="utf-8-sig")
         
